@@ -14,6 +14,19 @@ export function splitEqual(total, userIds) {
   })
 }
 
+/** Reparte centavos según porcentajes o participaciones, conservando el total. */
+export function splitRatio(totalInCents, entries) {
+  const sum = entries.reduce((total, entry) => total + Number(entry.value), 0)
+  if (!Number.isFinite(sum) || sum <= 0 || entries.some(entry => !Number.isFinite(Number(entry.value)) || Number(entry.value) <= 0)) return []
+  const exact = entries.map(entry => totalInCents * Number(entry.value) / sum)
+  const amounts = exact.map(Math.floor)
+  const remaining = totalInCents - amounts.reduce((total, value) => total + value, 0)
+  const order = exact.map((value, index) => ({ index, fraction: value - amounts[index] }))
+    .sort((a, b) => b.fraction - a.fraction || a.index - b.index)
+  for (let index = 0; index < remaining; index += 1) amounts[order[index].index] += 1
+  return entries.map((entry, index) => ({ usuario_id: entry.usuario_id, monto_asignado: amounts[index] / 100 }))
+}
+
 /** Deudas pendientes: cada división no pagada de alguien distinto al pagador. */
 export function pendingDebts(gastos, divisiones) {
   const byId = new Map(gastos.map(g => [g.id, g]))

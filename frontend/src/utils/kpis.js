@@ -74,8 +74,8 @@ export function calcularKpis(gastos, grupos, me, { hoy = new Date() } = {}) {
   const delAnterior = gastos.filter(g => enRango(g, anterior))
 
   // ---- 1. Gasto del mes y variación al mismo corte ----
-  const gastoMes = suma(delMes.map(g => g.monto_total))
-  const gastoAnterior = suma(delAnterior.map(g => g.monto_total))
+  const gastoMes = suma(delMes.map(g => g.monto_total_cop ?? g.monto_total))
+  const gastoAnterior = suma(delAnterior.map(g => g.monto_total_cop ?? g.monto_total))
   const varGasto = variacion(gastoMes, gastoAnterior)
   const estadoGasto = varGasto === null ? 'neutro'
     : varGasto <= METAS.variacionGasto.alerta ? 'ok'
@@ -95,10 +95,15 @@ export function calcularKpis(gastos, grupos, me, { hoy = new Date() } = {}) {
   // Se excluye la parte del propio pagador: esa no es una deuda.
   const deudas = gastos.flatMap(g => (g.divisiones || [])
     .filter(d => String(d.usuario_id) !== String(g.pagador_id))
-    .map(d => ({ ...d, fecha_gasto: g.fecha_gasto, pagador_id: g.pagador_id })))
+    .map(d => ({
+      ...d,
+      monto_asignado_cop: d.monto_asignado_cop ?? d.monto_asignado * (g.tasa_cop || 1),
+      fecha_gasto: g.fecha_gasto,
+      pagador_id: g.pagador_id,
+    })))
   const pendientes = deudas.filter(d => d.estado_pago === 'pendiente')
-  const montoAdeudado = suma(deudas.map(d => d.monto_asignado))
-  const montoPendiente = suma(pendientes.map(d => d.monto_asignado))
+  const montoAdeudado = suma(deudas.map(d => d.monto_asignado_cop))
+  const montoPendiente = suma(pendientes.map(d => d.monto_asignado_cop))
   const tasaRecaudo = montoAdeudado > 0 ? ((montoAdeudado - montoPendiente) / montoAdeudado) * 100 : null
   const antiguedad = pendientes.length
     ? suma(pendientes.map(d => diasEntre(d.fecha_gasto, hoyIso))) / pendientes.length
@@ -106,9 +111,9 @@ export function calcularKpis(gastos, grupos, me, { hoy = new Date() } = {}) {
   const pctPartesPendientes = deudas.length ? (pendientes.length / deudas.length) * 100 : null
 
   // ---- 7. Posición personal ----
-  const meDeben = suma(pendientes.filter(d => String(d.pagador_id) === me).map(d => d.monto_asignado))
-  const debo = suma(pendientes.filter(d => String(d.usuario_id) === me).map(d => d.monto_asignado))
-  const miAporteMes = suma(delMes.filter(g => String(g.pagador_id) === me).map(g => g.monto_total))
+  const meDeben = suma(pendientes.filter(d => String(d.pagador_id) === me).map(d => d.monto_asignado_cop))
+  const debo = suma(pendientes.filter(d => String(d.usuario_id) === me).map(d => d.monto_asignado_cop))
+  const miAporteMes = suma(delMes.filter(g => String(g.pagador_id) === me).map(g => g.monto_total_cop ?? g.monto_total))
   const miParticipacion = gastoMes > 0 ? (miAporteMes / gastoMes) * 100 : null
 
   // ---- 8. Actividad ----

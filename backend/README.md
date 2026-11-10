@@ -234,7 +234,11 @@ Todas estas rutas requieren `Authorization: Bearer <accessToken>`.
 | GET | `/api/grupos/:grupoId/integrantes` | Consultar integrantes activos del grupo. |
 | POST | `/api/grupos/:grupoId/integrantes` | Agregar un integrante por ID (`{ "usuarioId": 2 }`) o correo (`{ "email": "ana@example.com" }`). Solo administradores gestionan integrantes. |
 | DELETE | `/api/grupos/:grupoId/integrantes/:usuarioId` | Retirar un integrante; el grupo conserva un administrador activo. |
-| GET / POST | `/api/grupos/:grupoId/gastos` | Consultar o registrar gastos con división equitativa o personalizada. |
+| GET / POST | `/api/grupos/:grupoId/gastos` | Consultar o registrar gastos con división equitativa, personalizada, porcentual o por participaciones; admite artículos, moneda original, tasa de cambio e idempotencia. |
+| GET | `/api/grupos/:grupoId/recurrencias` | Consultar las recurrencias del grupo. |
+| PATCH | `/api/grupos/:grupoId/recurrencias/:recurrenciaId` | Pausar o reanudar una recurrencia (solo administrador). |
+| GET / POST | `/api/grupos/:grupoId/plantillas` | Consultar o guardar las plantillas de división del usuario autenticado. |
+| DELETE | `/api/grupos/:grupoId/plantillas/:plantillaId` | Eliminar una plantilla propia. |
 | DELETE | `/api/grupos/gastos/:gastoId` | Eliminar un gasto propio sin pagos confirmados ni liquidaciones asociadas; conserva un movimiento de auditoría. |
 | POST | `/api/grupos/gastos/:gastoId/pagos` | Reportar el pago de la participación del usuario autenticado; no cambia el balance hasta que el acreedor confirme. |
 | GET | `/api/grupos/:grupoId/liquidaciones` | Listar liquidaciones pendientes en las que participa el usuario autenticado. |
@@ -260,9 +264,26 @@ Ejemplo de gasto equitativo:
 ```
 
 El servicio reparte los importes en centavos para conservar exactamente el
-monto total. El alta del gasto, sus participaciones, movimientos, notificaciones
-y el recálculo de balances se ejecutan dentro de una transacción. Las migraciones
-`003_modulos_financieros.sql` crean las tablas e índices de estos módulos.
+monto total. Para `porcentaje` y `participaciones`, el cuerpo usa
+`asignaciones: [{ "usuarioId": 1, "valor": 60 }, ...]`; para la división
+personalizada usa `participaciones: [{ "usuarioId": 1, "montoAsignado": 12 }]`.
+El alta del gasto, sus participaciones, movimientos, notificaciones y el
+recálculo de balances se ejecutan dentro de una transacción.
+
+La migración `014_splitwise_capabilities.sql` añade monedas y tasas manuales
+fijas por grupo, datos monetarios originales, artículos, claves de idempotencia,
+recurrencias y plantillas de división. Un grupo conserva su ledger en su moneda;
+la tasa del grupo convierte los balances agregados a COP. La tasa ingresada por
+gasto convierte el monto original a la moneda contable del grupo. Aplica la
+migración con `npm run migrate:dev` antes de usar estas capacidades.
+
+Las recurrencias vencidas se generan al consultar los gastos, hasta 12
+ocurrencias por consulta; no hay scheduler de fondo. Las fechas mensuales y
+anuales conservan el día/mes de referencia y se ajustan al último día cuando
+el mes no tiene ese día. Si el pagador o algún participante deja de pertenecer
+al grupo, la recurrencia se pausa. El cliente conserva gastos creados sin
+conexión en una cola local; la sincronización de mutaciones fuera de línea se
+limita a crear gastos.
 
 Para registrar un grupo, enviar `integrantes` como una lista opcional de correos
 de cuentas activas. La creación del grupo y la incorporación de sus integrantes

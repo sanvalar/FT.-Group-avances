@@ -5,6 +5,11 @@ export interface ParticipacionCalculada {
   montoAsignado: number;
 }
 
+export interface ParticipacionProporcional {
+  usuarioId: number;
+  valor: number;
+}
+
 function aCentavos(monto: number): number {
   if (!Number.isFinite(monto) || monto < 0) {
     throw new ValidacionError('Los montos deben ser números positivos o cero.');
@@ -71,4 +76,50 @@ export function validarDistribucionPersonalizada(
     usuarioId,
     montoAsignado: centavos / 100,
   }));
+}
+
+function dividirPorProporcion(
+  montoTotal: number,
+  participaciones: ParticipacionProporcional[],
+  normalizarTotal: number | null,
+): ParticipacionCalculada[] {
+  const totalCentavos = aCentavos(montoTotal);
+  validarParticipantes(participaciones.map(({ usuarioId }) => usuarioId));
+  if (totalCentavos <= 0 || participaciones.some(({ valor }) => !Number.isFinite(valor) || valor <= 0)) {
+    throw new ValidacionError('Cada participante debe tener una proporción mayor que cero.');
+  }
+  const suma = participaciones.reduce((total, parte) => total + parte.valor, 0);
+  if (normalizarTotal !== null && Math.abs(suma - normalizarTotal) > 0.000001) {
+    throw new ValidacionError(`La suma de las proporciones debe ser ${normalizarTotal}.`);
+  }
+
+  const exactos = participaciones.map((parte) => ({
+    usuarioId: parte.usuarioId,
+    centavos: totalCentavos * parte.valor / suma,
+  }));
+  const pisos = exactos.map((parte) => Math.floor(parte.centavos));
+  const sobrantes = totalCentavos - pisos.reduce((total, centavos) => total + centavos, 0);
+  const orden = exactos
+    .map((parte, indice) => ({ indice, resto: parte.centavos - pisos[indice] }))
+    .sort((a, b) => b.resto - a.resto || a.indice - b.indice);
+  for (let indice = 0; indice < sobrantes; indice += 1) pisos[orden[indice].indice] += 1;
+
+  return participaciones.map((parte, indice) => ({
+    usuarioId: parte.usuarioId,
+    montoAsignado: pisos[indice] / 100,
+  }));
+}
+
+export function dividirPorPorcentaje(
+  montoTotal: number,
+  participaciones: ParticipacionProporcional[],
+): ParticipacionCalculada[] {
+  return dividirPorProporcion(montoTotal, participaciones, 100);
+}
+
+export function dividirPorParticipaciones(
+  montoTotal: number,
+  participaciones: ParticipacionProporcional[],
+): ParticipacionCalculada[] {
+  return dividirPorProporcion(montoTotal, participaciones, null);
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { netBalances, pairwise, pendingDebts, simplify, splitEqual } from '../src/utils/balances.js'
+import { netBalances, pairwise, pendingDebts, simplify, splitEqual, splitRatio } from '../src/utils/balances.js'
 
 test('splitEqual reparte sin perder ni inventar pesos', () => {
   for (const [total, n] of [[100000, 3], [10, 3], [1, 4], [99999, 7], [0, 2]]) {
@@ -11,6 +11,16 @@ test('splitEqual reparte sin perder ni inventar pesos', () => {
     assert.ok(Math.max(...montos) - Math.min(...montos) <= 1, 'la diferencia entre partes es como máximo 1 peso')
   }
   assert.deepEqual(splitEqual(100, []), [])
+})
+
+test('splitRatio reparte centavos y conserva el total', () => {
+  assert.deepEqual(splitRatio(1000, [
+    { usuario_id: 'a', value: 1 },
+    { usuario_id: 'b', value: 2 },
+  ]), [
+    { usuario_id: 'a', monto_asignado: 3.33 },
+    { usuario_id: 'b', monto_asignado: 6.67 },
+  ])
 })
 
 test('pendingDebts ignora lo pagado y la parte del propio pagador', () => {

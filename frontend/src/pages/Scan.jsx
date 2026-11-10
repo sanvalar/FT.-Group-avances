@@ -204,7 +204,18 @@ export default function Scan({ user }) {
                 )}
                 {result?.pdf && <p className="muted">Los PDF se adjuntan como comprobante; completa los datos del gasto.</p>}
                 <ExpenseForm user={user} grupos={grupos} formId="scan-form" origen="ocr"
-                  initial={{ descripcion: result?.descripcion || result?.comercio, monto: result?.monto || '', fecha: result?.fecha, categoria: result?.categoria }}
+                  initial={{
+                    descripcion: result?.descripcion || result?.comercio,
+                    monto: result?.monto || '',
+                    fecha: result?.fecha,
+                    categoria: result?.categoria,
+                    moneda: result?.moneda,
+                    articulos: result?.items?.map(item => ({
+                      descripcion: item.descripcion,
+                      cantidad: item.cantidad || 1,
+                      monto: item.valor || '',
+                    })),
+                  }}
                   recibo={{
                     imagen_url: file.name, docHash: result?.docHash,
                     monto_extraido: result?.monto || null, fecha_extraida: result?.fecha || null,

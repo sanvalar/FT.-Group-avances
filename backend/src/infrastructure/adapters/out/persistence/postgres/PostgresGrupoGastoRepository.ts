@@ -1,4 +1,5 @@
 import { Pool, PoolClient } from 'pg';
+import { createHash } from 'node:crypto';
 import {
   AccesoDenegadoError,
   ConflictoEstadoError,
@@ -13,6 +14,7 @@ import {
   GrupoGastoRepository,
   GrupoResumen,
   LiquidacionPendiente,
+  PlantillaDivision,
 } from '../../../../../domain/ports/out/GrupoGastoRepository';
 import { verificarDatosFactura } from '../../../../../domain/services/verificadorFacturaInternacional';
 
@@ -24,13 +26,16 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
     nombre: string,
     descripcion?: string,
     integrantes: string[] = [],
+    moneda = 'COP',
+    tasaCop = 1,
+    instruccionesPago?: string,
   ): Promise<GrupoResumen> {
     return this.enTransaccion(async (client) => {
       const resultado = await client.query(
-        `INSERT INTO grupo (nombre, descripcion, creado_por)
-         VALUES ($1, $2, $3)
-         RETURNING id, nombre, descripcion, fecha_creacion`,
-        [nombre, descripcion || null, usuarioId],
+        `INSERT INTO grupo (nombre, descripcion, creado_por, moneda, tasa_cop, instrucciones_pago)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, nombre, descripcion, fecha_creacion, moneda, tasa_cop, instrucciones_pago`,
+        [nombre, descripcion || null, usuarioId, moneda, tasaCop, instruccionesPago || null],
       );
       const grupo = resultado.rows[0];
       let miembrosActivos = 1;
@@ -67,19 +72,23 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
         rol: 'administrador',
         miembrosActivos,
         fechaCreacion: grupo.fecha_creacion,
+        moneda: grupo.moneda,
+        tasaCop: Number(grupo.tasa_cop),
+        instruccionesPago: grupo.instrucciones_pago,
       };
     });
   }
 
   async listarGrupos(usuarioId: number): Promise<GrupoResumen[]> {
     const resultado = await this.pool.query(
-      `SELECT g.id, g.nombre, g.descripcion, m.rol, g.fecha_creacion,
+      `SELECT g.id, g.nombre, g.descripcion, g.moneda, g.tasa_cop, g.instrucciones_pago,
+              m.rol, g.fecha_creacion,
               COUNT(mi.id)::int AS miembros_activos
        FROM grupo g
        JOIN miembro_grupo m ON m.grupo_id = g.id AND m.usuario_id = $1 AND m.estado = 'activo'
        JOIN miembro_grupo mi ON mi.grupo_id = g.id AND mi.estado = 'activo'
        WHERE g.estado = 'activo'
-       GROUP BY g.id, g.nombre, g.descripcion, m.rol, g.fecha_creacion
+       GROUP BY g.id, g.nombre, g.descripcion, g.moneda, g.tasa_cop, g.instrucciones_pago, m.rol, g.fecha_creacion
        ORDER BY g.fecha_creacion DESC`,
       [usuarioId],
     );
@@ -90,6 +99,9 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
       rol: fila.rol,
       miembrosActivos: fila.miembros_activos,
       fechaCreacion: fila.fecha_creacion,
+      moneda: fila.moneda,
+      tasaCop: Number(fila.tasa_cop),
+      instruccionesPago: fila.instrucciones_pago,
     }));
   }
 
@@ -216,6 +228,39 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
   async crearGasto(actorId: number, grupoId: number, datos: CrearGastoDatos): Promise<unknown> {
     return this.enTransaccion(async (client) => {
       await this.exigirMiembro(client, actorId, grupoId, true);
+      const huellaSolicitud = datos.solicitudId
+        ? createHash('sha256').update(JSON.stringify(datos)).digest('hex')
+        : null;
+      if (datos.solicitudId) {
+        await client.query(
+          `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+          [`${grupoId}:${actorId}:${datos.solicitudId}`],
+        );
+        const existente = await client.query(
+          `SELECT id, grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria,
+                  tipo_division, origen_registro, fecha_registro, moneda_original, monto_original,
+                  tasa_cambio, huella_solicitud,
+                  (SELECT COALESCE(json_agg(json_build_object(
+                    'usuarioId', p.usuario_id, 'montoAsignado', p.monto_asignado
+                  ) ORDER BY p.usuario_id), '[]'::json)
+                   FROM participacion_gasto p WHERE p.gasto_id = gasto.id) AS participaciones,
+                  (SELECT COALESCE(json_agg(json_build_object(
+                    'descripcion', a.descripcion, 'cantidad', a.cantidad, 'montoTotal', a.monto_total
+                  ) ORDER BY a.orden), '[]'::json)
+                   FROM gasto_articulo a WHERE a.gasto_id = gasto.id) AS articulos
+           FROM gasto
+           WHERE grupo_id = $1 AND creado_por = $2 AND solicitud_id = $3
+           FOR UPDATE`,
+          [grupoId, actorId, datos.solicitudId],
+        );
+        if (existente.rows[0]) {
+          if (existente.rows[0].huella_solicitud !== huellaSolicitud) {
+            throw new ConflictoEstadoError('El identificador de sincronización ya se usó con datos distintos.');
+          }
+          const { huella_solicitud: _huella, ...gastoExistente } = existente.rows[0];
+          return gastoExistente;
+        }
+      }
       const pagadorId = datos.pagadorId ?? actorId;
       const pagadorActivo = await client.query(
         `SELECT 1 FROM miembro_grupo WHERE grupo_id = $1 AND usuario_id = $2 AND estado = 'activo'`,
@@ -253,10 +298,11 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
 
       const gastoResultado = await client.query(
         `INSERT INTO gasto
-          (grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria, tipo_division, origen_registro)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          (grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria, tipo_division,
+           origen_registro, moneda_original, monto_original, tasa_cambio, creado_por, solicitud_id, huella_solicitud)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING id, grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria,
-                   tipo_division, origen_registro, fecha_registro`,
+                   tipo_division, origen_registro, fecha_registro, moneda_original, monto_original, tasa_cambio`,
         [
           grupoId,
           pagadorId,
@@ -266,9 +312,22 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
           datos.categoria,
           datos.tipoDivision,
           datos.origenRegistro ?? 'manual',
+          datos.monedaOriginal ?? 'COP',
+          datos.montoOriginal ?? datos.montoTotal,
+          datos.tasaCambio ?? 1,
+          actorId,
+          datos.solicitudId ?? null,
+          huellaSolicitud,
         ],
       );
       const gasto = gastoResultado.rows[0];
+      for (const [orden, articulo] of (datos.articulos ?? []).entries()) {
+        await client.query(
+          `INSERT INTO gasto_articulo (gasto_id, descripcion, cantidad, monto_total, orden)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [gasto.id, articulo.descripcion, articulo.cantidad, articulo.montoTotal, orden],
+        );
+      }
       let comprobanteVerificacion;
       if (datos.comprobante) {
         comprobanteVerificacion = verificarDatosFactura(datos.comprobante, duplicada);
@@ -299,6 +358,26 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
         );
       }
 
+      if (datos.recurrencia) {
+        if (datos.recurrencia.proximaFecha <= new Date().toISOString().slice(0, 10)) {
+          throw new ValidacionError('La primera fecha recurrente debe ser futura.');
+        }
+        await client.query(
+          `INSERT INTO gasto_recurrente
+            (grupo_id, creado_por, pagador_id, descripcion, monto_total, categoria, tipo_division,
+             participaciones, articulos, moneda_original, monto_original, tasa_cambio, frecuencia,
+             proxima_fecha, mes_ano, dia_mes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13, $14,
+                   EXTRACT(MONTH FROM $14::date)::smallint, EXTRACT(DAY FROM $14::date)::smallint)`,
+          [
+            grupoId, actorId, pagadorId, datos.descripcion, datos.montoTotal, datos.categoria,
+            datos.tipoDivision, JSON.stringify(datos.participaciones), JSON.stringify(datos.articulos ?? []),
+            datos.monedaOriginal ?? 'COP', datos.montoOriginal ?? datos.montoTotal,
+            datos.tasaCambio ?? 1, datos.recurrencia.frecuencia, datos.recurrencia.proximaFecha,
+          ],
+        );
+      }
+
       await this.registrarMovimiento(client, actorId, grupoId, gasto.id, 'gasto_creado', `Se registró el gasto: ${datos.descripcion}.`);
       await client.query(
         `INSERT INTO notificacion (usuario_id, tipo, mensaje)
@@ -308,15 +387,27 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
       );
       await this.recalcularBalances(client, grupoId);
 
-      return { ...gasto, participaciones: datos.participaciones, comprobanteVerificacion };
+      return {
+        ...gasto,
+        participaciones: datos.participaciones,
+        articulos: datos.articulos ?? [],
+        comprobanteVerificacion,
+      };
     });
   }
 
   async listarGastos(usuarioId: number, grupoId: number): Promise<unknown[]> {
     await this.exigirMiembro(this.pool, usuarioId, grupoId);
+    await this.generarGastosRecurrentes(grupoId);
     const resultado = await this.pool.query(
       `SELECT g.id, g.grupo_id, g.pagador_id, u.nombre AS pagador, g.descripcion,
               g.monto_total, g.fecha_gasto, g.categoria, g.tipo_division, g.origen_registro, g.fecha_registro,
+              g.moneda_original, g.monto_original, g.tasa_cambio,
+              COALESCE(grupo.tasa_cop, 1) AS tasa_cop,
+              (SELECT COALESCE(json_agg(json_build_object(
+                'descripcion', a.descripcion, 'cantidad', a.cantidad, 'montoTotal', a.monto_total
+              ) ORDER BY a.orden), '[]'::json)
+               FROM gasto_articulo a WHERE a.gasto_id = g.id) AS articulos,
               (SELECT json_build_object(
                 'archivoHash', cf.archivo_hash, 'comercio', cf.comercio, 'nit', cf.nit_normalizado,
                 'numeroFactura', cf.numero_factura_normalizado, 'cufe', cf.cufe,
@@ -329,6 +420,7 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
                 'estadoPago', p.estado_pago, 'fechaPago', p.fecha_pago
               ) ORDER BY p.usuario_id) FILTER (WHERE p.id IS NOT NULL), '[]'::json) AS participaciones
        FROM gasto g
+       JOIN grupo ON grupo.id = g.grupo_id
        JOIN usuario u ON u.id = g.pagador_id
        LEFT JOIN participacion_gasto p ON p.gasto_id = g.id
        LEFT JOIN usuario up ON up.id = p.usuario_id
@@ -338,6 +430,206 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
       [grupoId],
     );
     return resultado.rows;
+  }
+
+  async listarRecurrencias(usuarioId: number, grupoId: number): Promise<unknown[]> {
+    await this.exigirMiembro(this.pool, usuarioId, grupoId);
+    const resultado = await this.pool.query(
+      `SELECT id, descripcion, monto_total AS "montoTotal", categoria, frecuencia,
+              proxima_fecha AS "proximaFecha", activa, moneda_original AS "monedaOriginal"
+       FROM gasto_recurrente
+       WHERE grupo_id = $1
+       ORDER BY proxima_fecha, id`,
+      [grupoId],
+    );
+    return resultado.rows;
+  }
+
+  async cambiarRecurrencia(actorId: number, grupoId: number, recurrenciaId: number, activa: boolean): Promise<void> {
+    await this.enTransaccion(async (client) => {
+      await this.exigirAdministrador(client, actorId, grupoId);
+      const resultado = await client.query(
+        `UPDATE gasto_recurrente SET activa = $3
+         WHERE id = $1 AND grupo_id = $2 AND activa <> $3`,
+        [recurrenciaId, grupoId, activa],
+      );
+      if (resultado.rowCount === 0) {
+        throw new ConflictoEstadoError('La recurrencia no existe, ya tiene ese estado o ya finalizó.');
+      }
+    });
+  }
+
+  async listarPlantillas(usuarioId: number, grupoId: number): Promise<PlantillaDivision[]> {
+    await this.exigirMiembro(this.pool, usuarioId, grupoId);
+    const resultado = await this.pool.query(
+      `SELECT id, grupo_id AS "grupoId", nombre, tipo_division AS "tipoDivision", asignaciones
+       FROM plantilla_division
+       WHERE grupo_id = $1 AND usuario_id = $2
+       ORDER BY nombre, id`,
+      [grupoId, usuarioId],
+    );
+    return resultado.rows;
+  }
+
+  async guardarPlantilla(
+    usuarioId: number,
+    grupoId: number,
+    nombre: string,
+    tipoDivision: 'equitativa' | 'personalizada' | 'porcentaje' | 'participaciones',
+    asignaciones: Array<{ usuarioId: number; valor: number }>,
+  ): Promise<{
+    id: number;
+    grupoId: number;
+    nombre: string;
+    tipoDivision: 'equitativa' | 'personalizada' | 'porcentaje' | 'participaciones';
+    asignaciones: Array<{ usuarioId: number; valor: number }>;
+  }> {
+    return this.enTransaccion(async (client) => {
+      await this.exigirMiembro(client, usuarioId, grupoId, true);
+      if (new Set(asignaciones.map(item => item.usuarioId)).size !== asignaciones.length) {
+        throw new ValidacionError('La plantilla contiene participantes duplicados.');
+      }
+      const resultado = await client.query(
+        `INSERT INTO plantilla_division (grupo_id, usuario_id, nombre, tipo_division, asignaciones)
+         VALUES ($1, $2, $3, $4, $5::jsonb)
+         ON CONFLICT (grupo_id, usuario_id, nombre)
+         DO UPDATE SET tipo_division = EXCLUDED.tipo_division, asignaciones = EXCLUDED.asignaciones
+         RETURNING id, grupo_id AS "grupoId", nombre, tipo_division AS "tipoDivision", asignaciones`,
+        [grupoId, usuarioId, nombre, tipoDivision, JSON.stringify(asignaciones)],
+      );
+      return resultado.rows[0];
+    });
+  }
+
+  async eliminarPlantilla(actorId: number, grupoId: number, plantillaId: number): Promise<void> {
+    await this.enTransaccion(async (client) => {
+      await this.exigirMiembro(client, actorId, grupoId, true);
+      const resultado = await client.query(
+        `DELETE FROM plantilla_division
+         WHERE id = $1 AND grupo_id = $2 AND usuario_id = $3
+         RETURNING id`,
+        [plantillaId, grupoId, actorId],
+      );
+      if (resultado.rowCount === 0) {
+        throw new ConflictoEstadoError('No se encontró una plantilla propia en este grupo.');
+      }
+    });
+  }
+
+  private async generarGastosRecurrentes(grupoId: number): Promise<void> {
+    await this.enTransaccion(async (client) => {
+      const recurrencias = await client.query(
+        `SELECT * FROM gasto_recurrente
+         WHERE grupo_id = $1 AND activa = TRUE AND proxima_fecha <= CURRENT_DATE
+         ORDER BY proxima_fecha, id
+         FOR UPDATE`,
+        [grupoId],
+      );
+      for (const recurrencia of recurrencias.rows) {
+        let generados = 0;
+        while (String(recurrencia.proxima_fecha).slice(0, 10) <= new Date().toISOString().slice(0, 10) && generados < 12) {
+          const pagadorActivo = await client.query(
+            `SELECT 1 FROM miembro_grupo WHERE grupo_id = $1 AND usuario_id = $2 AND estado = 'activo'`,
+            [grupoId, recurrencia.pagador_id],
+          );
+          if (pagadorActivo.rowCount === 0) {
+            await client.query(`UPDATE gasto_recurrente SET activa = FALSE WHERE id = $1`, [recurrencia.id]);
+            break;
+          }
+          const fechaProgramada = String(recurrencia.proxima_fecha).slice(0, 10);
+          const gasto = await client.query(
+            `INSERT INTO gasto
+              (grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria, tipo_division,
+               origen_registro, moneda_original, monto_original, tasa_cambio, creado_por)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual', $8, $9, $10, $11)
+             RETURNING id`,
+            [
+              grupoId, recurrencia.pagador_id, recurrencia.descripcion, recurrencia.monto_total,
+              fechaProgramada, recurrencia.categoria, recurrencia.tipo_division,
+              recurrencia.moneda_original, recurrencia.monto_original, recurrencia.tasa_cambio,
+              recurrencia.creado_por,
+            ],
+          );
+          const gastoId = Number(gasto.rows[0].id);
+          const participaciones = typeof recurrencia.participaciones === 'string'
+            ? JSON.parse(recurrencia.participaciones) as Array<{ usuarioId: number; montoAsignado: number }>
+            : recurrencia.participaciones as Array<{ usuarioId: number; montoAsignado: number }>;
+          const activos = await client.query(
+            `SELECT usuario_id FROM miembro_grupo
+             WHERE grupo_id = $1 AND estado = 'activo' AND usuario_id = ANY($2::bigint[])`,
+            [grupoId, participaciones.map(parte => parte.usuarioId)],
+          );
+          if (activos.rowCount !== participaciones.length) {
+            await client.query(`DELETE FROM gasto WHERE id = $1`, [gastoId]);
+            await client.query(`UPDATE gasto_recurrente SET activa = FALSE WHERE id = $1`, [recurrencia.id]);
+            break;
+          }
+          for (const parte of participaciones) {
+            await client.query(
+              `INSERT INTO participacion_gasto (gasto_id, usuario_id, monto_asignado, estado_pago, fecha_pago)
+               VALUES ($1, $2, $3, $4, CASE WHEN $4::varchar = 'pagado' THEN NOW() ELSE NULL END)`,
+              [gastoId, parte.usuarioId, parte.montoAsignado, parte.usuarioId === Number(recurrencia.pagador_id) ? 'pagado' : 'pendiente'],
+            );
+          }
+          const articulos = typeof recurrencia.articulos === 'string'
+            ? JSON.parse(recurrencia.articulos) as Array<{ descripcion: string; cantidad: number; montoTotal: number }>
+            : recurrencia.articulos as Array<{ descripcion: string; cantidad: number; montoTotal: number }>;
+          for (const [orden, articulo] of (articulos ?? []).entries()) {
+            await client.query(
+              `INSERT INTO gasto_articulo (gasto_id, descripcion, cantidad, monto_total, orden)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [gastoId, articulo.descripcion, articulo.cantidad, articulo.montoTotal, orden],
+            );
+          }
+          await client.query(
+            `INSERT INTO gasto_recurrente_instancia (recurrencia_id, fecha_programada, gasto_id)
+             VALUES ($1, $2, $3)`,
+            [recurrencia.id, fechaProgramada, gastoId],
+          );
+          await this.registrarMovimiento(client, Number(recurrencia.creado_por), grupoId, gastoId, 'gasto_creado', `Se generó el gasto recurrente: ${recurrencia.descripcion}.`);
+          await client.query(
+            `INSERT INTO notificacion (usuario_id, tipo, mensaje)
+             SELECT usuario_id, 'nuevo_gasto', $2 FROM miembro_grupo
+             WHERE grupo_id = $1 AND estado = 'activo' AND usuario_id <> $3`,
+            [grupoId, `Se generó un gasto recurrente: ${recurrencia.descripcion}.`, recurrencia.creado_por],
+          );
+          await this.recalcularBalances(client, grupoId);
+          const siguiente = await client.query(
+            `UPDATE gasto_recurrente
+             SET proxima_fecha = CASE frecuencia
+               WHEN 'semanal' THEN proxima_fecha + 7
+               WHEN 'mensual' THEN (
+                 date_trunc('month', proxima_fecha) + INTERVAL '1 month'
+                 + (
+                   LEAST(
+                     dia_mes,
+                     EXTRACT(DAY FROM (
+                       date_trunc('month', proxima_fecha) + INTERVAL '2 months' - INTERVAL '1 day'
+                     ))::int
+                   ) - 1
+                 ) * INTERVAL '1 day'
+               )::date
+               ELSE make_date(
+                 EXTRACT(YEAR FROM proxima_fecha)::int + 1,
+                 mes_ano,
+                 LEAST(
+                   dia_mes,
+                   EXTRACT(DAY FROM (
+                     make_date(EXTRACT(YEAR FROM proxima_fecha)::int + 1, mes_ano, 1)
+                     + INTERVAL '1 month' - INTERVAL '1 day'
+                   ))::int
+                 )
+               )
+             END
+             WHERE id = $1
+             RETURNING proxima_fecha`,
+            [recurrencia.id],
+          );
+          recurrencia.proxima_fecha = siguiente.rows[0].proxima_fecha;
+          generados += 1;
+        }
+      }
+    });
   }
 
   async eliminarGasto(actorId: number, gastoId: number): Promise<void> {

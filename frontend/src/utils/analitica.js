@@ -14,6 +14,7 @@
 
 const periodo = fecha => fecha.slice(0, 7)          // 2026-10-07 -> 2026-10
 const media = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+const montoContable = gasto => Number(gasto.monto_total_cop ?? (gasto.monto_total * (gasto.tasa_cop || 1))) || 0
 
 const mediana = xs => {
   if (!xs.length) return 0
@@ -45,7 +46,7 @@ export function serieMensual(gastos) {
   for (const g of gastos) {
     const p = periodo(g.fecha_gasto)
     const fila = acum.get(p) || { periodo: p, total: 0, num_gastos: 0 }
-    fila.total += g.monto_total
+    fila.total += montoContable(g)
     fila.num_gastos += 1
     acum.set(p, fila)
   }
@@ -67,10 +68,10 @@ export function serieMensual(gastos) {
  * 0 = todos aportan por igual · 1 = una sola persona paga todo.
  */
 function concentracion(gastos) {
-  const total = gastos.reduce((s, g) => s + g.monto_total, 0)
+  const total = gastos.reduce((s, g) => s + montoContable(g), 0)
   if (!total) return 0
   const porPagador = new Map()
-  for (const g of gastos) porPagador.set(g.pagador_id, (porPagador.get(g.pagador_id) || 0) + g.monto_total)
+  for (const g of gastos) porPagador.set(g.pagador_id, (porPagador.get(g.pagador_id) || 0) + montoContable(g))
   const n = porPagador.size
   if (n <= 1) return 1
   const hhi = [...porPagador.values()].reduce((s, v) => s + (v / total) ** 2, 0)
@@ -97,7 +98,7 @@ function sumarPeriodo(gastos, desde, hasta, selector = () => 'total') {
     if (gasto.fecha_gasto < desde || gasto.fecha_gasto > hasta) continue
     const clave = selector(gasto)
     if (clave === null || clave === undefined || clave === '') continue
-    acumulados.set(clave, (acumulados.get(clave) || 0) + gasto.monto_total)
+    acumulados.set(clave, (acumulados.get(clave) || 0) + montoContable(gasto))
   }
   return acumulados
 }
@@ -137,7 +138,7 @@ function comparacionSegmentos(gastos, hoy) {
 export function indicadores(gastos, me, { hoy = new Date() } = {}) {
   if (!gastos.length) return null
 
-  const montos = gastos.map(g => g.monto_total)
+  const montos = gastos.map(montoContable)
   const total = montos.reduce((a, b) => a + b, 0)
   const serie = serieMensual(gastos)
 
@@ -151,18 +152,22 @@ export function indicadores(gastos, me, { hoy = new Date() } = {}) {
   const porCategoria = new Map()
   const porGrupo = new Map()
   for (const g of gastos) {
-    porCategoria.set(g.categoria, (porCategoria.get(g.categoria) || 0) + g.monto_total)
+    porCategoria.set(g.categoria, (porCategoria.get(g.categoria) || 0) + montoContable(g))
     const nombre = g.grupo?.nombre || g.grupo_id
-    porGrupo.set(nombre, (porGrupo.get(nombre) || 0) + g.monto_total)
+    porGrupo.set(nombre, (porGrupo.get(nombre) || 0) + montoContable(g))
   }
   const orden = m => [...m.entries()].sort((a, b) => b[1] - a[1])
 
   // Posición personal consolidada.
   let debe = 0, leDeben = 0, aportado = 0, asignado = 0
   for (const g of gastos) {
-    if (g.pagador_id === me) { aportado += g.monto_total; leDeben += g.me_deben || 0 }
-    asignado += g.mi_parte || 0
-    if (g.mi_estado === 'pendiente') debe += g.mi_parte || 0
+    const tasaCop = g.tasa_cop || 1
+    if (g.pagador_id === me) {
+      aportado += montoContable(g)
+      leDeben += Number(g.me_deben_cop ?? (g.me_deben || 0) * tasaCop)
+    }
+    asignado += Number(g.mi_parte_cop ?? (g.mi_parte || 0) * tasaCop)
+    if (g.mi_estado === 'pendiente') debe += Number(g.mi_parte_cop ?? (g.mi_parte || 0) * tasaCop)
   }
 
   return {
@@ -272,13 +277,13 @@ export function atipicos(gastos, umbral = UMBRAL_ROBUSTO) {
   const porGrupo = crearCubetas(g => g.grupo_id ?? null)
   const prepararCubetas = cubetas => new Map([...cubetas].map(([clave, filas]) => [
     clave,
-    filas.length >= 5 ? { cantidad: filas.length, ...estadisticasRobustas(filas.map(g => g.monto_total)) } : null,
+    filas.length >= 5 ? { cantidad: filas.length, ...estadisticasRobustas(filas.map(montoContable)) } : null,
   ]))
   const datosGrupoCategoria = prepararCubetas(porGrupoCategoria)
   const datosCategoria = prepararCubetas(porCategoria)
   const datosGrupo = prepararCubetas(porGrupo)
   const datosGlobales = gastos.length >= 5
-    ? { cantidad: gastos.length, ...estadisticasRobustas(gastos.map(g => g.monto_total)) }
+    ? { cantidad: gastos.length, ...estadisticasRobustas(gastos.map(montoContable)) }
     : null
   const anomalos = []
   for (const gasto of gastos) {
@@ -291,7 +296,7 @@ export function atipicos(gastos, umbral = UMBRAL_ROBUSTO) {
     if (!comparables) continue
 
     const { centro, escala } = comparables.datos
-    const diferencia = gasto.monto_total - centro
+    const diferencia = montoContable(gasto) - centro
     const z = escala > 0 ? diferencia / escala : diferencia === 0 ? 0 : Math.sign(diferencia) * umbral
     if (Math.abs(z) >= umbral) {
       anomalos.push({
@@ -374,7 +379,7 @@ export function estimadores(gastos, serie, { horizonte = 3, hoy = new Date() } =
   const fechaFin = `${anio}-${String(mes).padStart(2, '0')}-${String(transcurridos).padStart(2, '0')}`
   const totalSemana = gastos.reduce((total, gasto) => (
     gasto.fecha_gasto >= fechaInicio && gasto.fecha_gasto <= fechaFin
-      ? total + gasto.monto_total
+      ? total + montoContable(gasto)
       : total
   ), 0)
   const mediaMovil = (totalSemana / VENTANA_DIAS) * dias

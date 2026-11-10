@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { financeApi, usesLocalFinance } from '../services/financeApi'
 import { useData } from '../utils/useData'
 import { currentMonthLabel, firstName, money } from '../utils/format'
+import { formatGroupAmount } from '../utils/currency'
 import { Alert, Avatar, Empty, Loader, PageHeader } from '../components/ui'
 import Icon from '../components/Icon'
 import MapView from '../components/MapView'
@@ -25,7 +26,36 @@ export default function Dashboard({ user }) {
   }, [user.id])
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState({ type: 'success', text: '' })
+  const [offlineQueue, setOfflineQueue] = useState([])
+  const [queueError, setQueueError] = useState('')
   const isLocal = usesLocalFinance(user)
+
+  useEffect(() => {
+    let active = true
+    const syncQueue = async () => {
+      try {
+        const before = await financeApi.pendingOfflineExpenses(user)
+        const after = navigator.onLine
+          ? await financeApi.flushOfflineExpenses(user)
+          : before
+        if (!active) return
+        setOfflineQueue(after)
+        setQueueError('')
+        if (before.length > after.length) reload()
+      } catch (error) {
+        if (active) setQueueError(error.message)
+      }
+    }
+    const refreshQueue = () => syncQueue()
+    syncQueue()
+    window.addEventListener('online', refreshQueue)
+    window.addEventListener('ft-offline-queue-updated', refreshQueue)
+    return () => {
+      active = false
+      window.removeEventListener('online', refreshQueue)
+      window.removeEventListener('ft-offline-queue-updated', refreshQueue)
+    }
+  }, [user.id])
 
   if (loading) return <Loader />
   if (error) return <Alert>{error}</Alert>
@@ -37,12 +67,14 @@ export default function Dashboard({ user }) {
     const key = `${p.grupo_id}${p.de}${p.para}`
     setBusy(key); setMsg({ text: '' })
     try {
-      await financeApi.settle(user, { grupo_id: p.grupo_id, de: p.de, para: p.para, monto: p.monto })
+      await financeApi.settle(user, { grupo_id: p.grupo_id, de: p.de, para: p.para, monto: p.montoGrupo ?? p.monto })
+      const grupoPago = grupos.find(grupo => String(grupo.id) === String(p.grupo_id))
+      const instrucciones = grupoPago?.instruccionesPago
       setMsg({
         type: 'success',
         text: isLocal
-          ? `Liquidación de ${money(p.monto)} registrada en la demostración.`
-          : `Pago de ${money(p.monto)} reportado en ${p.grupo}; queda pendiente de confirmación.`,
+          ? `Liquidación de ${formatGroupAmount(p.montoGrupo ?? p.monto, grupoPago)} registrada en la demostración.`
+          : `Pago de ${formatGroupAmount(p.montoGrupo ?? p.monto, grupoPago)} reportado en ${p.grupo}; queda pendiente de confirmación.${instrucciones ? ` Instrucciones del grupo: ${instrucciones}` : ''}`,
       })
       await reload()
     } catch (err) {
@@ -55,7 +87,8 @@ export default function Dashboard({ user }) {
     setBusy(key); setMsg({ text: '' })
     try {
       await financeApi.confirmSettlement(user, p.grupo_id, pendiente.id)
-      setMsg({ type: 'success', text: `Recepción de ${money(pendiente.monto)} confirmada en ${p.grupo}.` })
+      const grupoPago = grupos.find(grupo => String(grupo.id) === String(p.grupo_id))
+      setMsg({ type: 'success', text: `Recepción de ${formatGroupAmount(pendiente.monto, grupoPago)} confirmada en ${p.grupo}.` })
       await reload()
     } catch (err) {
       setMsg({ type: 'error', text: err.message })
@@ -86,6 +119,38 @@ export default function Dashboard({ user }) {
       </div>
 
       <Alert type={msg.type}>{msg.text}</Alert>
+      <Alert>{queueError}</Alert>
+
+      {offlineQueue.length > 0 && (
+        <section className="section">
+          <h2 className="section-title">Gastos pendientes de sincronización</h2>
+          <p className="muted">Los gastos en esta lista aún no afectan los balances del grupo.</p>
+          <ul className="list">
+            {offlineQueue.map(item => (
+              <li key={item.id} className="list-row">
+                <div className="list-main">
+                  <span className="list-title">{item.descripcion}</span>
+                  <small className={item.status === 'needs_review' ? 'neg' : 'muted'}>
+                    {item.status === 'needs_review' ? `Requiere revisión: ${item.error}` : 'Esperando conexión para sincronizar'}
+                  </small>
+                </div>
+                <div className="list-end">
+                  {item.status === 'needs_review' && (
+                    <button className="btn btn-ghost btn-xs" onClick={async () => {
+                      const remaining = await financeApi.retryOfflineExpense(user, item.id)
+                      setOfflineQueue(remaining)
+                      if (remaining.length < offlineQueue.length) reload()
+                    }}>Reintentar</button>
+                  )}
+                  <button className="btn btn-danger-ghost btn-xs" onClick={async () => {
+                    setOfflineQueue(await financeApi.discardOfflineExpense(user, item.id))
+                  }}>Descartar</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="dash-grid">
         <section className="section">
@@ -97,6 +162,7 @@ export default function Dashboard({ user }) {
               {liquidaciones.map(p => {
                 const mine = p.de === me || p.para === me
                 const key = `${p.grupo_id}${p.de}${p.para}`
+                const grupoPago = grupos.find(g => String(g.id) === String(p.grupo_id))
                 const pendiente = liquidacionesPendientes.find(item =>
                   item.grupo_id === String(p.grupo_id) && item.de === String(p.de) && item.para === String(p.para))
                 return (
@@ -107,7 +173,11 @@ export default function Dashboard({ user }) {
                       <small className="muted">{p.grupo}</small>
                     </div>
                     <div className="list-end">
-                      <strong className={`amount ${p.para === me ? 'pos' : p.de === me ? 'neg' : 'muted'}`}>{money(p.monto)}</strong>
+                      <strong className={`amount ${p.para === me ? 'pos' : p.de === me ? 'neg' : 'muted'}`}>
+                        {p.montoGrupo != null ? formatGroupAmount(p.montoGrupo, grupoPago) : money(p.monto)}
+                      </strong>
+                      {mine && p.de === me && grupoPago?.instruccionesPago
+                        && <small className="muted">{grupoPago.instruccionesPago}</small>}
                       {mine && p.de === me && (
                         pendiente
                           ? <small className="muted">Esperando confirmación</small>

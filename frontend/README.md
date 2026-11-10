@@ -9,9 +9,9 @@ Frontend web (React + Vite) de FT. GROUP, basado en los prototipos de las versio
 | `/login`, `/registro` | Autenticación | **Backend real** (`/api/auth`) |
 | `/panel` | Panel de control: balance neto, te deben / debes, liquidaciones sugeridas, mis grupos, mapa | **Backend real**, excepto la cuenta de exposición |
 | `/grupos` | Grupos financieros: tarjetas con miembros, total y mi balance; crear grupo; agregar integrantes | **Backend real**, excepto la cuenta de exposición |
-| `/gastos` | Registro de gastos: filtro por grupo, tabla (tarjetas en celular), agregar gasto con división igual o personalizada, detalle y registro de pagos | **Backend real**, excepto la cuenta de exposición |
+| `/gastos` | Registro y búsqueda de gastos, división equitativa, personalizada, por porcentaje o participaciones, artículos, moneda, plantillas, recurrencias y registro de pagos | **Backend real**, excepto la cuenta de exposición |
 | `/analisis` | Análisis y predicciones: KPIs básicos con semáforo, indicadores, estimadores, proyección y gastos atípicos | Se calcula en el navegador con los datos de gastos y grupos |
-| `/historial` | Historial por mes con filtros de grupo y categoría, total filtrado y movimientos recientes | **Backend real**, excepto la cuenta de exposición |
+| `/historial` | Historial por mes con filtros y búsqueda, total filtrado, movimientos recientes e importación CSV con vista previa | **Backend real**, excepto la cuenta de exposición |
 | `/escanear` | Escaneo de recibos: carga/arrastre o cámara del celular, OCR con Tesseract.js y formulario prellenado | Usa los grupos de demostración de la cuenta de exposición |
 | `/perfil` | Ver/editar nombre y teléfono, desactivar cuenta, cerrar sesión | **Backend real** |
 | `/administracion` | Gestión de cuentas: consulta de usuarios y acciones permitidas por rol | **Backend real** |
@@ -30,6 +30,10 @@ La auditoría está disponible únicamente para supervisores. Registra solicitud
 En las cuentas normales, los módulos financieros usan el backend y PostgreSQL. La cuenta común de exposición usa datos de ejemplo guardados en el navegador; las operaciones que realices con ella no modifican PostgreSQL. Para crear un grupo en el modo backend, los integrantes deben tener una cuenta registrada y se agregan por su correo.
 
 Los pagos del modo backend siguen confirmación bilateral: el deudor reporta la transferencia y el acreedor la confirma desde el panel; el balance cambia solo después de confirmar. Los errores de red o del API se muestran y no se convierten en operaciones locales exitosas. En modo de demostración, las operaciones permanecen en el navegador.
+
+Los grupos usan una moneda contable y una tasa manual fija a COP; los gastos también guardan moneda y monto originales con su tasa de cambio. Se pueden registrar artículos y dividir por porcentajes o participaciones. Las plantillas se guardan por usuario y grupo. Los gastos recurrentes se generan al consultar los gastos (hasta 12 ocurrencias por consulta), no mediante un scheduler en segundo plano; las frecuencias mensual y anual conservan el día/mes de referencia y se ajustan al último día del mes cuando sea necesario.
+
+El historial permite importar hasta 100 filas de un CSV de máximo 2 MB, con columnas de descripción, fecha, monto y categoría. La importación muestra una vista previa, divide cada gasto equitativamente entre los integrantes y no confirma pagos ni concilia automáticamente extractos bancarios. Los pagos externos son instrucciones y reportes con confirmación bilateral; la aplicación no mueve dinero.
 
 La cuenta `usuario@ftgroup.test` usa automáticamente datos financieros de demostración guardados solo en el navegador, incluso si `VITE_FINANCE_MODE=api`. Así puede recorrer con ejemplos el panel, grupos, gastos, historial, análisis y escaneo, sin modificar datos del backend. En «Mi perfil» se pueden restaurar los datos de ejemplo. Las demás cuentas siguen usando el modo configurado. Si quieres poner toda la app en modo demostración, usa `VITE_FINANCE_MODE=local`.
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   dividirEquitativamente,
+  dividirPorParticipaciones,
+  dividirPorPorcentaje,
   validarDistribucionPersonalizada,
 } from '../../src/domain/services/distribucionGasto';
 import { ValidacionError } from '../../src/domain/errors/DomainErrors';
@@ -26,5 +28,35 @@ describe('distribución de gastos', () => {
 
   it('rechaza ids de participantes duplicados', () => {
     expect(() => dividirEquitativamente(10, [1, 1])).toThrow(ValidacionError);
+  });
+
+  it('distribuye porcentajes y participaciones en centavos sin alterar el total', () => {
+    expect(dividirPorPorcentaje(10, [
+      { usuarioId: 1, valor: 33.33 },
+      { usuarioId: 2, valor: 33.33 },
+      { usuarioId: 3, valor: 33.34 },
+    ])).toEqual([
+      { usuarioId: 1, montoAsignado: 3.33 },
+      { usuarioId: 2, montoAsignado: 3.33 },
+      { usuarioId: 3, montoAsignado: 3.34 },
+    ]);
+    expect(dividirPorParticipaciones(10, [
+      { usuarioId: 1, valor: 1 },
+      { usuarioId: 2, valor: 2 },
+    ])).toEqual([
+      { usuarioId: 1, montoAsignado: 3.33 },
+      { usuarioId: 2, montoAsignado: 6.67 },
+    ]);
+  });
+
+  it('rechaza porcentajes que no suman 100 y proporciones no positivas', () => {
+    expect(() => dividirPorPorcentaje(10, [
+      { usuarioId: 1, valor: 50 },
+      { usuarioId: 2, valor: 49 },
+    ])).toThrow(ValidacionError);
+    expect(() => dividirPorParticipaciones(10, [
+      { usuarioId: 1, valor: 1 },
+      { usuarioId: 2, valor: 0 },
+    ])).toThrow(ValidacionError);
   });
 });

@@ -45,18 +45,20 @@ async function cargarGruposUsuario(usuarioId: number) {
     const miembros = miembrosRaw.map(registro);
     const gastos = gastosRaw.map(registro);
     const balances = balancesRaw.map(registro);
-    const miBalance = balances.reduce((total, balance) => {
+    const tasaCop = numero(grupo.tasaCop) || 1;
+    const miBalanceGrupo = balances.reduce((total, balance) => {
       if (numero(balance.acreedorId) === usuarioId) return total + numero(balance.monto);
       if (numero(balance.deudorId) === usuarioId) return total - numero(balance.monto);
       return total;
     }, 0);
     const detalle = {
       ...grupo,
+      tasaCop,
       icono: 'users',
       ciudad: null,
-      totalGastos: gastos.reduce((total, gasto) => total + numero(gasto.monto_total), 0),
+      totalGastos: gastos.reduce((total, gasto) => total + numero(gasto.monto_total) * tasaCop, 0),
       numGastos: gastos.length,
-      miBalance,
+      miBalance: miBalanceGrupo * tasaCop,
       miembros,
     };
     const liquidaciones = balances.map((balance) => {
@@ -67,7 +69,10 @@ async function cargarGruposUsuario(usuarioId: number) {
         grupo: grupo.nombre,
         de,
         para,
-        monto: numero(balance.monto),
+        monto: numero(balance.monto) * tasaCop,
+        montoGrupo: numero(balance.monto),
+        moneda: grupo.moneda || 'COP',
+        tasaCop,
         deUsuario: miembros.find((miembro) => numero(miembro.id) === de),
         paraUsuario: miembros.find((miembro) => numero(miembro.id) === para),
       };
@@ -177,6 +182,9 @@ const GrupoType = new GraphQLObjectType({
     nombre: { type: new GraphQLNonNull(GraphQLString) },
     descripcion: { type: GraphQLString },
     rol: { type: GraphQLString },
+    moneda: { type: GraphQLString },
+    tasaCop: { type: GraphQLFloat },
+    instruccionesPago: { type: GraphQLString },
     miembrosActivos: { type: GraphQLInt },
     icono: { type: GraphQLString },
     ciudad: { type: GraphQLString },
@@ -203,6 +211,9 @@ const LiquidacionType = new GraphQLObjectType({
     de: { type: GraphQLID },
     para: { type: GraphQLID },
     monto: { type: GraphQLFloat },
+    montoGrupo: { type: GraphQLFloat },
+    moneda: { type: GraphQLString },
+    tasaCop: { type: GraphQLFloat },
     deUsuario: { type: MiembroGrupoType },
     paraUsuario: { type: MiembroGrupoType },
   },

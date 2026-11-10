@@ -13,6 +13,9 @@ export class GrupoGastoController {
         req.body.nombre,
         req.body.descripcion,
         req.body.integrantes,
+        req.body.moneda,
+        req.body.tasaCop,
+        req.body.instruccionesPago,
       );
       res.status(201).json({ grupo });
     } catch (error) {
@@ -71,6 +74,76 @@ export class GrupoGastoController {
   listarGastos = async (req: RequestAutenticado, res: Response, next: NextFunction) => {
     try {
       res.status(200).json({ gastos: await this.service.listarGastos(req.usuario!.id, Number(req.params.grupoId)) });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  listarRecurrencias = async (req: RequestAutenticado, res: Response, next: NextFunction) => {
+    try {
+      res.status(200).json({
+        recurrencias: await this.service.listarRecurrencias(req.usuario!.id, Number(req.params.grupoId)),
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  cambiarRecurrencia = async (
+    req: RequestAutenticado & { body: { activa: boolean } },
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      await this.service.cambiarRecurrencia(
+        req.usuario!.id,
+        Number(req.params.grupoId),
+        Number(req.params.recurrenciaId),
+        req.body.activa,
+      );
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  listarPlantillas = async (req: RequestAutenticado, res: Response, next: NextFunction) => {
+    try {
+      res.status(200).json({
+        plantillas: await this.service.listarPlantillas(req.usuario!.id, Number(req.params.grupoId)),
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  guardarPlantilla = async (
+    req: RequestAutenticado & { body: { nombre: string; tipoDivision: 'equitativa' | 'personalizada' | 'porcentaje' | 'participaciones'; asignaciones: Array<{ usuarioId: number; valor: number }> } },
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const plantilla = await this.service.guardarPlantilla(
+        req.usuario!.id,
+        Number(req.params.grupoId),
+        req.body.nombre,
+        req.body.tipoDivision,
+        req.body.asignaciones,
+      );
+      res.status(201).json({ plantilla });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  eliminarPlantilla = async (req: RequestAutenticado, res: Response, next: NextFunction) => {
+    try {
+      await this.service.eliminarPlantilla(
+        req.usuario!.id,
+        Number(req.params.grupoId),
+        Number(req.params.plantillaId),
+      );
+      res.status(204).send();
     } catch (error) {
       next(error);
     }

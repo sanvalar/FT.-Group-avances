@@ -6,9 +6,10 @@ import { GROUP_ICONS, money } from '../utils/format'
 import { Alert, AvatarStack, Empty, Loader, Modal, PageHeader } from '../components/ui'
 import Icon from '../components/Icon'
 import { CIUDADES } from '../components/MapView'
+import { CURRENCIES } from '../currency/CurrencyContext'
 
 function NewGroupModal({ user, onClose, onCreated }) {
-  const [form, setForm] = useState({ nombre: '', descripcion: '', icono: 'building', ciudad: 'Medellín' })
+  const [form, setForm] = useState({ nombre: '', descripcion: '', icono: 'building', ciudad: 'Medellín', moneda: 'COP', tasaCop: '1', instruccionesPago: '' })
   const [integrantes, setIntegrantes] = useState([''])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -38,6 +39,26 @@ function NewGroupModal({ user, onClose, onCreated }) {
         <div className="field">
           <label htmlFor="g-nombre">Nombre del grupo</label>
           <input id="g-nombre" name="nombre" value={form.nombre} onChange={change} placeholder="Ej. Apartamento 402" maxLength={120} required autoFocus />
+        </div>
+        <div className="form-row">
+          <div className="field">
+            <label htmlFor="g-moneda">Moneda del grupo</label>
+            <select id="g-moneda" name="moneda" value={form.moneda}
+              onChange={e => setForm(f => ({ ...f, moneda: e.target.value, tasaCop: e.target.value === 'COP' ? '1' : '' }))}>
+              {Object.values(CURRENCIES).map(moneda => <option key={moneda.code} value={moneda.code}>{moneda.code} · {moneda.name}</option>)}
+            </select>
+          </div>
+          {form.moneda !== 'COP' && <div className="field">
+            <label htmlFor="g-tasa-cop">Equivalencia a COP</label>
+            <input id="g-tasa-cop" name="tasaCop" type="number" min="0.00000001" step="any"
+              value={form.tasaCop} onChange={change} required />
+            <small className="hint">Cuántos COP vale 1 {form.moneda}. Se usará para comparar grupos en el panel.</small>
+          </div>}
+          <div className="field">
+            <label htmlFor="g-pago">Instrucciones para pagar <span className="muted">(opcional)</span></label>
+            <input id="g-pago" name="instruccionesPago" value={form.instruccionesPago} onChange={change} maxLength={500}
+              placeholder="Ej. Transferir por Nequi y avisar al grupo" />
+          </div>
         </div>
         <div className="field">
           <label htmlFor="g-desc">Descripción <span className="muted">(opcional)</span></label>
@@ -133,6 +154,7 @@ export default function Groups({ user }) {
                 <div>
                   <h3>{g.nombre}</h3>
                   <small className="muted">{g.miembros.length} miembros{g.ciudad ? ` · ${g.ciudad}` : ''}</small>
+                  <small className="muted">{g.moneda || 'COP'}{g.moneda && g.moneda !== 'COP' ? ` · 1 ${g.moneda} = ${g.tasaCop} COP` : ''}{g.instruccionesPago ? ` · ${g.instruccionesPago}` : ''}</small>
                 </div>
                 {g.rol === 'administrador' && <span className="pill">Admin</span>}
               </header>

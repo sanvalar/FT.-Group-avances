@@ -98,6 +98,9 @@ export const graphqlApi = {
           nombre
           descripcion
           rol
+          moneda
+          tasaCop
+          instruccionesPago
           miembrosActivos
           fechaCreacion
           icono
@@ -135,6 +138,9 @@ export const graphqlApi = {
             nombre
             descripcion
             rol
+            moneda
+            tasaCop
+            instruccionesPago
             miembrosActivos
             fechaCreacion
             icono
@@ -155,6 +161,9 @@ export const graphqlApi = {
             de
             para
             monto
+            montoGrupo
+            moneda
+            tasaCop
             deUsuario { id nombre }
             paraUsuario { id nombre }
           }
