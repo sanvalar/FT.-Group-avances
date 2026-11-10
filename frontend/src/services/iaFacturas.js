@@ -2,10 +2,30 @@
 // Si la IA no está configurada, no hay sesión real o el servidor falla,
 // las funciones lanzan un error y Scan.jsx usa el OCR local (Tesseract).
 
-import { API_URL, refreshSession, tokens } from './http'
+import { API_URL, refreshSession, request, tokens } from './http'
 
 const MAX_LADO = 2000 // px: suficiente para leer recibos y liviano para subir
 const MAX_PDF_BYTES = 4 * 1024 * 1024 // límite práctico de funciones serverless (Vercel ~4.5 MB)
+
+export async function hashArchivoFactura(file) {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export async function verificarFacturaOCR(file, texto) {
+  const archivoHash = await hashArchivoFactura(file)
+  try {
+    const respuesta = await request('/ia/verificar', {
+      method: 'POST',
+      auth: true,
+      body: { texto, archivoHash },
+    })
+    return { ...respuesta, archivoHash }
+  } catch (error) {
+    error.archivoHash = archivoHash
+    throw error
+  }
+}
 
 /** Reduce y recomprime la imagen a JPEG para subirla rápido desde el celular. */
 export async function prepararImagen(file) {
@@ -77,6 +97,9 @@ export async function analizarFacturaConIa(file) {
     moneda: d.moneda || 'COP',
     items: Array.isArray(d.items) ? d.items : [],
     observaciones: d.observaciones,
+    cufe: d.cufe || null,
+    docHash: d.docHash,
+    verificacion: d.verificacion,
     motor: 'ia',
   }
 }

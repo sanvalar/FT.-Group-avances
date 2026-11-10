@@ -2,6 +2,7 @@ import {
   parseColombianAmount,
   parseInvoiceText,
   splitExpense,
+  verificarDatosFactura,
 } from '../../src/domain/services/verificadorFacturaInternacional';
 
 describe('verificador internacional de facturas', () => {
@@ -11,6 +12,7 @@ describe('verificador internacional de facturas', () => {
       RESTAURANTE COLOMBIA
       NIT: 900.123.456-7
       FACTURA: FAC-9821
+      FECHA: 2026-10-20
       CUFE: ${'a'.repeat(96)}
       SUBTOTAL: 45.000
       IVA: 8.550
@@ -20,13 +22,33 @@ describe('verificador internacional de facturas', () => {
     expect(factura.total).toBe(58050);
     expect(factura.nitFiscal).toBe('9001234567');
     expect(factura.cufe).toHaveLength(96);
-    expect(factura.docHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(factura.textoHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(factura.estadoVisual).toContain('no verificada oficialmente');
   });
 
   it('requiere confirmacion manual cuando la confianza es baja', () => {
     const factura = parseInvoiceText('Factura ilegible con numeros 123');
     expect(factura.requiereConfirmacionManual).toBe(true);
     expect(factura.confianza).toBeLessThan(0.90);
+    expect(factura.estadoVisual).not.toBe('Verificada');
+  });
+
+  it('no afirma autenticidad y detecta inconsistencias aritmeticas o duplicados', () => {
+    const comprobante = {
+      archivoHash: 'a'.repeat(64),
+      comercio: 'Comercio',
+      nit: '9001234567',
+      numeroFactura: 'FE-1',
+      cufe: null,
+      fecha: '2026-10-20',
+      montoTotal: 100000,
+      subtotal: 90000,
+      impuestos: 8000,
+      propina: 0,
+    };
+    expect(verificarDatosFactura(comprobante).estado).toBe('inconsistente');
+    expect(verificarDatosFactura(comprobante).verificacionOficial).toBe(false);
+    expect(verificarDatosFactura({ ...comprobante, subtotal: 92000 }, true).estado).toBe('duplicada');
   });
 
   it('el reparto por productos conserva exactamente el total en centavos', () => {

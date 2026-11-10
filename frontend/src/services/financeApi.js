@@ -246,7 +246,12 @@ const local = {
       const pagado = d.usuario_id === pagador_id
       st.divisiones.push({ gasto_id: id, usuario_id: d.usuario_id, monto_asignado: monto, estado_pago: pagado ? 'pagado' : 'pendiente', fecha_pago: pagado ? fecha_gasto : null })
     }
-    if (recibo) st.recibos.push({ id: uidGen('r-'), gasto_id: id, ...recibo, estado_validacion: 'confirmado', fecha_procesamiento: new Date().toISOString() })
+    if (recibo) st.recibos.push({
+      id: uidGen('r-'), gasto_id: id, ...recibo,
+      estado_validacion: recibo.verificacion?.estado || 'pendiente',
+      verificacion: recibo.verificacion || null,
+      fecha_procesamiento: new Date().toISOString(),
+    })
     addHistorial(st, me, grupo_id, 'gasto_creado', descripcion, id)
     save(user, st)
     return id
@@ -317,7 +322,40 @@ const remote = {
     const response = await request('/gastos', { auth: true })
     return arrayFromResponse(response, ['gastos'], '/gastos')
   },
-  createExpense: (_u, body) => request('/gastos', { method: 'POST', auth: true, body }),
+  createExpense: (_u, body) => {
+    const comprobante = body.recibo?.docHash ? {
+      archivoHash: body.recibo.docHash,
+      comercio: body.recibo.comercio_extraido || null,
+      nit: body.recibo.nit || null,
+      numeroFactura: body.recibo.numero_factura || null,
+      cufe: body.recibo.cufe || null,
+      fecha: body.recibo.fecha_extraida || null,
+      montoTotal: body.recibo.monto_extraido || null,
+      subtotal: body.recibo.subtotal ?? null,
+      impuestos: body.recibo.impuestos ?? null,
+      propina: body.recibo.propina ?? null,
+    } : undefined
+    const comunes = {
+      descripcion: body.descripcion,
+      montoTotal: body.monto_total,
+      fechaGasto: body.fecha_gasto,
+      categoria: body.categoria,
+      pagadorId: Number(body.pagador_id),
+      ...(comprobante ? { comprobante } : {}),
+    }
+    const division = body.tipo_division === 'personalizada'
+      ? {
+          ...comunes,
+          tipoDivision: 'personalizada',
+          participaciones: body.divisiones.map(d => ({ usuarioId: Number(d.usuario_id), montoAsignado: d.monto_asignado })),
+        }
+      : {
+          ...comunes,
+          tipoDivision: 'equitativa',
+          usuarioIds: body.divisiones.map(d => Number(d.usuario_id)),
+        }
+    return request(`/grupos/${body.grupo_id}/gastos`, { method: 'POST', auth: true, body: division })
+  },
   deleteExpense: (_u, id) => request(`/gastos/${id}`, { method: 'DELETE', auth: true }),
   payShare: (u, gastoId, usuarioId = String(u.id)) =>
     request(`/gastos/${gastoId}/pagar`, { method: 'POST', auth: true, body: { usuario_id: usuarioId } }),

@@ -24,6 +24,7 @@ const ESQUEMA = {
     comercio: { type: ['string', 'null'], description: 'Nombre del comercio o razón social' },
     nit: { type: ['string', 'null'] },
     numeroFactura: { type: ['string', 'null'] },
+    cufe: { type: ['string', 'null'], description: 'CUFE o CUDE impreso, sin validar oficialmente' },
     fecha: { type: ['string', 'null'], description: 'YYYY-MM-DD' },
     montoTotal: { type: ['number', 'null'] },
     subtotal: { type: ['number', 'null'] },
@@ -47,7 +48,7 @@ const ESQUEMA = {
     confianza: { type: 'number' },
     observaciones: { type: ['string', 'null'], description: 'Advertencias breves, p. ej. texto borroso' },
   },
-  required: ['esFactura', 'montoTotal', 'fecha', 'comercio', 'categoria', 'confianza'],
+  required: ['esFactura', 'montoTotal', 'fecha', 'comercio', 'categoria', 'confianza', 'cufe'],
 };
 
 export interface OpcionesClaudeFacturaExtractor {

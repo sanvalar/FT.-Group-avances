@@ -16,6 +16,7 @@ export interface DatosFactura {
   comercio: string | null;
   nit: string | null;
   numeroFactura: string | null;
+  cufe: string | null;
   fecha: string | null; // YYYY-MM-DD
   montoTotal: number | null; // pesos, sin centavos
   subtotal: number | null;
@@ -27,6 +28,19 @@ export interface DatosFactura {
   items: ItemFactura[];
   confianza: number; // 0 - 100
   observaciones: string | null;
+}
+
+export interface ComprobanteFactura {
+  archivoHash: string;
+  comercio: string | null;
+  nit: string | null;
+  numeroFactura: string | null;
+  cufe: string | null;
+  fecha: string | null;
+  montoTotal: number | null;
+  subtotal: number | null;
+  impuestos: number | null;
+  propina: number | null;
 }
 
 export interface FacturaExtractor {

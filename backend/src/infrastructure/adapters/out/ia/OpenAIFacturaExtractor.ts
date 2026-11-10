@@ -25,6 +25,7 @@ export const ESQUEMA_FACTURA_OPENAI = {
     comercio: nulo('string', 'Nombre del comercio o razón social'),
     nit: nulo('string'),
     numeroFactura: nulo('string'),
+    cufe: nulo('string', 'CUFE o CUDE impreso, sin validar oficialmente'),
     fecha: nulo('string', 'YYYY-MM-DD'),
     montoTotal: nulo('number'),
     subtotal: nulo('number'),
@@ -50,7 +51,7 @@ export const ESQUEMA_FACTURA_OPENAI = {
     observaciones: nulo('string', 'Advertencias breves, p. ej. texto borroso'),
   },
   required: [
-    'esFactura', 'comercio', 'nit', 'numeroFactura', 'fecha', 'montoTotal', 'subtotal', 'impuestos',
+    'esFactura', 'comercio', 'nit', 'numeroFactura', 'cufe', 'fecha', 'montoTotal', 'subtotal', 'impuestos',
     'propina', 'moneda', 'categoria', 'descripcionSugerida', 'items', 'confianza', 'observaciones',
   ],
 };

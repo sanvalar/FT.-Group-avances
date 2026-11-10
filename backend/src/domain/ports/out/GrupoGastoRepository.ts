@@ -1,3 +1,4 @@
+import { ComprobanteFactura } from './FacturaExtractor';
 import { ParticipacionCalculada } from '../../services/distribucionGasto';
 
 export interface GrupoResumen {
@@ -14,8 +15,10 @@ export interface CrearGastoDatos {
   montoTotal: number;
   fechaGasto: string;
   categoria: string;
+  pagadorId?: number;
   tipoDivision: 'equitativa' | 'personalizada';
   participaciones: ParticipacionCalculada[];
+  comprobante?: ComprobanteFactura;
 }
 
 export interface GrupoGastoRepository {

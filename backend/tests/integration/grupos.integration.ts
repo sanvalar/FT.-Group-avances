@@ -56,10 +56,32 @@ describe('Integración · Grupos, gastos y balances', () => {
     const respuesta = await request(app).post(`/api/grupos/${grupoId}/gastos`).set(bearer(ana)).send({
       descripcion: 'Mercado del mes', montoTotal: 100000, fechaGasto: '2026-10-20', categoria: 'alimentacion',
       tipoDivision: 'equitativa', usuarioIds: [ana.id, beto.id, carla.id],
+      comprobante: {
+        archivoHash: 'a'.repeat(64), comercio: 'RESTAURANTE COLOMBIA', nit: '9001234567',
+        numeroFactura: 'FE-9821', cufe: 'b'.repeat(96), fecha: '2026-10-20',
+        montoTotal: 100000, subtotal: 100000, impuestos: 0, propina: 0,
+      },
     });
     expect(respuesta.status).toBe(201);
+    expect(respuesta.body.gasto.comprobanteVerificacion).toMatchObject({
+      estado: 'datos_consistentes',
+      verificacionOficial: false,
+    });
     const montos = respuesta.body.gasto.participaciones.map((p: { montoAsignado: number }) => p.montoAsignado);
     expect(montos.reduce((a: number, b: number) => a + b, 0)).toBeCloseTo(100000, 2);
+
+    const duplicado = await request(app).post('/api/ia/verificar').set(bearer(ana)).send({
+      archivoHash: 'a'.repeat(64),
+      texto: `RESTAURANTE COLOMBIA
+        NIT: 9001234567
+        FACTURA: FE-9821
+        FECHA: 2026-10-20
+        SUBTOTAL: 100.000
+        VALOR TOTAL: 100.000`,
+    });
+    expect(duplicado.status).toBe(200);
+    expect(duplicado.body.verificacion.estado).toBe('duplicada');
+    expect(duplicado.body.verificacion.verificacionOficial).toBe(false);
   });
 
   it('calcula los balances: Beto le debe a Ana su parte', async () => {

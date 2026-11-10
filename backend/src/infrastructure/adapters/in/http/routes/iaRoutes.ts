@@ -1,11 +1,14 @@
 import express, { NextFunction, Response, Router } from 'express';
 import crypto from 'crypto';
+import { z } from 'zod';
 import { env } from '../../../../config/env';
 import { autenticar, autorizarRoles, RequestAutenticado } from '../middlewares/authMiddleware';
 import { ClaudeFacturaExtractor } from '../../../out/ia/ClaudeFacturaExtractor';
 import { OpenAIFacturaExtractor } from '../../../out/ia/OpenAIFacturaExtractor';
 import { IaNoDisponibleError } from '../../../out/ia/facturaIaComun';
-import { FacturaExtractor, TipoArchivoFactura } from '../../../../../domain/ports/out/FacturaExtractor';
+import { ComprobanteFactura, FacturaExtractor, TipoArchivoFactura } from '../../../../../domain/ports/out/FacturaExtractor';
+import { parseInvoiceText, verificarDatosFactura } from '../../../../../domain/services/verificadorFacturaInternacional';
+import { pool } from '../../../out/persistence/postgres/db';
 
 /**
  * Adaptador de entrada: escaneo de facturas con IA.
@@ -33,6 +36,10 @@ import { FacturaExtractor, TipoArchivoFactura } from '../../../../../domain/port
 const TIPOS_PERMITIDOS: TipoArchivoFactura[] = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const maxMb = Number(process.env.IA_MAX_MB ?? 8);
 const limitePorHora = Number(process.env.IA_LIMITE_POR_HORA ?? 30);
+const verificarTextoSchema = z.object({
+  texto: z.string().trim().min(1).max(20_000),
+  archivoHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+});
 
 function crearExtractor(): FacturaExtractor | null {
   const proveedor = (process.env.IA_PROVEEDOR ?? 'openai').toLowerCase();
@@ -95,6 +102,55 @@ export function firmaCoincide(archivo: Buffer, tipo: TipoArchivoFactura): boolea
 
 const router = Router();
 
+async function esDuplicada(comprobante: ComprobanteFactura): Promise<boolean> {
+  const nit = comprobante.nit?.replace(/\D/g, '') || null;
+  const numeroFactura = comprobante.numeroFactura?.trim().toUpperCase() || null;
+  const resultado = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM comprobante_factura
+       WHERE archivo_hash = $1
+          OR ($2::varchar IS NOT NULL AND $3::varchar IS NOT NULL
+              AND nit_normalizado = $2 AND numero_factura_normalizado = $3)
+     ) AS duplicada`,
+    [comprobante.archivoHash, nit, numeroFactura],
+  );
+  return resultado.rows[0].duplicada;
+}
+
+router.post('/verificar', autenticar, autorizarRoles('usuario'), limitarFrecuencia, async (req: RequestAutenticado, res: Response, next: NextFunction) => {
+  const entrada = verificarTextoSchema.safeParse(req.body);
+  if (!entrada.success) {
+    res.status(400).json({
+      error: 'DatosInvalidos',
+      mensaje: 'Envía texto OCR y, opcionalmente, un hash SHA-256 válido del archivo.',
+    });
+    return;
+  }
+
+  try {
+    const extraido = parseInvoiceText(entrada.data.texto);
+    const comprobante: ComprobanteFactura = {
+      archivoHash: entrada.data.archivoHash ?? crypto.createHash('sha256').update(entrada.data.texto).digest('hex'),
+      comercio: extraido.comercio ?? null,
+      nit: extraido.nitFiscal ?? null,
+      numeroFactura: extraido.numeroFactura ?? null,
+      cufe: extraido.cufe ?? null,
+      fecha: extraido.fecha ?? null,
+      montoTotal: extraido.total || null,
+      subtotal: extraido.subtotal ?? null,
+      impuestos: extraido.impuestos ?? null,
+      propina: extraido.propina ?? null,
+    };
+    const duplicada = await esDuplicada(comprobante);
+    res.status(200).json({
+      datos: comprobante,
+      verificacion: verificarDatosFactura(comprobante, duplicada),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/estado', autenticar, autorizarRoles('usuario'), (_req, res) => {
   res.json({ disponible: extractor !== null });
 });
@@ -126,10 +182,24 @@ router.post(
       const datos = await extractor!.extraer(req.body, tipo);
       const confianza = typeof datos.confianza === 'number' ? datos.confianza : 0;
       const docHash = crypto.createHash('sha256').update(req.body).digest('hex');
+      const comprobante: ComprobanteFactura = {
+        archivoHash: docHash,
+        comercio: datos.comercio,
+        nit: datos.nit,
+        numeroFactura: datos.numeroFactura,
+        cufe: datos.cufe,
+        fecha: datos.fecha,
+        montoTotal: datos.montoTotal,
+        subtotal: datos.subtotal,
+        impuestos: datos.impuestos,
+        propina: datos.propina,
+      };
+      const duplicada = await esDuplicada(comprobante);
       res.status(200).json({
         datos: {
           ...datos,
           docHash,
+          verificacion: verificarDatosFactura(comprobante, duplicada),
           requiereConfirmacionManual: confianza < 90,
           advertenciaConfianza: confianza < 90
             ? 'La extracción tiene confianza inferior al 90%. Confirma manualmente los montos antes de guardar.'

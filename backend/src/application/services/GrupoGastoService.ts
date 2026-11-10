@@ -5,15 +5,18 @@ import {
   validarDistribucionPersonalizada,
 } from '../../domain/services/distribucionGasto';
 import { CrearGastoDatos, GrupoGastoRepository } from '../../domain/ports/out/GrupoGastoRepository';
+import { ComprobanteFactura } from '../../domain/ports/out/FacturaExtractor';
 
 export interface RegistrarGastoComando {
   descripcion: string;
   montoTotal: number;
   fechaGasto: string;
   categoria: string;
+  pagadorId?: number;
   tipoDivision: 'equitativa' | 'personalizada';
   usuarioIds?: number[];
   participaciones?: ParticipacionCalculada[];
+  comprobante?: ComprobanteFactura;
 }
 
 export class GrupoGastoService {
@@ -66,8 +69,10 @@ export class GrupoGastoService {
       montoTotal: comando.montoTotal,
       fechaGasto: comando.fechaGasto,
       categoria: comando.categoria.trim(),
+      pagadorId: comando.pagadorId,
       tipoDivision: comando.tipoDivision,
       participaciones,
+      comprobante: comando.comprobante,
     };
     return this.repository.crearGasto(actorId, grupoId, datos);
   }

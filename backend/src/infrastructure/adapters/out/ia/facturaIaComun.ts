@@ -31,6 +31,7 @@ Reglas:
 - categoria debe ser exactamente una de: ${CATEGORIAS_FACTURA.join(', ')}.
 - descripcionSugerida: frase corta (máx. 60 caracteres) que describa el gasto, p. ej. "Mercado en Éxito" o "Almuerzo en Crepes & Waffles".
 - Si un dato no aparece o no se puede leer, usa null. No inventes datos.
+- Extrae CUFE/CUDE únicamente si aparece claramente impreso; no afirmes que es válido.
 - confianza: de 0 a 100, qué tan seguro estás de que el monto total y la fecha son correctos.
 - Si la imagen no es una factura o recibo, marca esFactura = false.
 - moneda: código ISO 4217 (COP si no se indica otra).
@@ -93,6 +94,7 @@ export function normalizarDatosFactura(entrada: Record<string, unknown>): DatosF
     comercio: texto(entrada.comercio, 60),
     nit: texto(entrada.nit, 30),
     numeroFactura: texto(entrada.numeroFactura, 40),
+    cufe: texto(entrada.cufe, 96),
     fecha: fechaValida(entrada.fecha),
     montoTotal: numero(entrada.montoTotal),
     subtotal: numero(entrada.subtotal),

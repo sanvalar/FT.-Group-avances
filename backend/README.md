@@ -251,6 +251,21 @@ monto total. El alta del gasto, sus participaciones, movimientos, notificaciones
 y el recálculo de balances se ejecutan dentro de una transacción. Las migraciones
 `003_modulos_financieros.sql` crean las tablas e índices de estos módulos.
 
+### Verificación de comprobantes
+
+`POST /api/ia/facturas` extrae campos con IA y calcula un hash SHA-256 del archivo.
+Cuando se utiliza OCR local, `POST /api/ia/verificar` recibe `{ "texto": "...",
+"archivoHash": "<sha256>" }` para revisar consistencia aritmética, formato de
+identificadores y duplicados previamente guardados. Al crear un gasto se puede
+enviar el objeto `comprobante` con ese hash y los campos detectados; el resultado
+queda persistido en `comprobante_factura` dentro de la misma transacción del gasto.
+
+Los estados `datos_consistentes`, `inconsistente`, `pendiente` y `duplicada` son
+controles internos, no una prueba de autenticidad. La aplicación no consulta a
+la DIAN ni valida criptográficamente CUFE/CUDE; la interfaz lo indica de forma
+explícita. La migración `012_verificacion_comprobantes.sql` se ejecuta con
+`npm run migrate:dev`.
+
 ### Ejemplos con `curl`
 
 **Registrar usuario**

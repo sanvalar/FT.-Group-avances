@@ -28,7 +28,7 @@ describe('Pruebas Automáticas de Facturación, OCR, Confianza y Reparto', () =>
     expect(parsed.total).not.toBe(9001234567);
     expect(parsed.nitFiscal).toBe('9001234567');
     expect(parsed.confianza).toBeGreaterThanOrEqual(0.90);
-    expect(parsed.estadoVisual).toBe('Verificada');
+    expect(parsed.estadoVisual).toBe('Datos consistentes (no verificada oficialmente)');
     expect(parsed.productos.length).toBeGreaterThan(0);
   });
 

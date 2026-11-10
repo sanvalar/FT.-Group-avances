@@ -28,6 +28,19 @@ const gastoComun = {
   montoTotal: montoPositivo,
   fechaGasto: fechaISO,
   categoria: z.string().trim().min(1).max(60),
+  pagadorId: z.number().int().positive().optional(),
+  comprobante: z.object({
+    archivoHash: z.string().regex(/^[a-f0-9]{64}$/i),
+    comercio: z.string().trim().max(120).nullable(),
+    nit: z.string().trim().max(20).nullable(),
+    numeroFactura: z.string().trim().max(60).nullable(),
+    cufe: z.string().trim().max(96).nullable(),
+    fecha: fechaISO.nullable(),
+    montoTotal: z.number().nonnegative().nullable(),
+    subtotal: z.number().nonnegative().nullable(),
+    impuestos: z.number().nonnegative().nullable(),
+    propina: z.number().nonnegative().nullable(),
+  }).optional(),
 };
 
 export const crearGastoSchema = z.discriminatedUnion('tipoDivision', [

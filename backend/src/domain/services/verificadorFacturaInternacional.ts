@@ -3,6 +3,76 @@
  * Soporte para Facturación Colombiana (CUFE/CUDS, NIT, Formato Numérico con Puntos de Miles)
  */
 import crypto from 'crypto';
+import { ComprobanteFactura } from '../ports/out/FacturaExtractor';
+
+export type EstadoVerificacionFactura = 'datos_consistentes' | 'inconsistente' | 'pendiente' | 'duplicada';
+
+export interface ResultadoVerificacionFactura {
+  estado: EstadoVerificacionFactura;
+  fuente: 'validacion_local';
+  verificacionOficial: false;
+  docHash: string;
+  mensajes: string[];
+}
+
+export function verificarDatosFactura(
+  datos: ComprobanteFactura,
+  duplicada = false,
+): ResultadoVerificacionFactura {
+  const mensajes: string[] = [];
+  const nit = datos.nit?.replace(/\D/g, '') ?? '';
+  const tieneDatosClave = Boolean(datos.comercio && datos.numeroFactura && datos.fecha && datos.montoTotal !== null);
+  let inconsistente = false;
+
+  if (datos.montoTotal === null || datos.montoTotal <= 0) {
+    mensajes.push('No se pudo confirmar un monto total mayor que cero.');
+    inconsistente = true;
+  }
+  if (datos.fecha && !fechaISOValida(datos.fecha)) {
+    mensajes.push('La fecha extraída no es válida.');
+    inconsistente = true;
+  }
+  if (datos.nit && (nit.length < 9 || nit.length > 10)) {
+    mensajes.push('El NIT detectado no tiene el formato habitual colombiano; revísalo.');
+    inconsistente = true;
+  }
+  if (datos.cufe && !/^[a-f0-9]{96}$/i.test(datos.cufe)) {
+    mensajes.push('El CUFE/CUDE detectado no tiene el formato esperado; revísalo.');
+    inconsistente = true;
+  }
+
+  const valoresContables = [datos.subtotal, datos.impuestos, datos.propina];
+  if (datos.montoTotal !== null && valoresContables.every((valor) => valor !== null)) {
+    const suma = valoresContables.reduce<number>((total, valor) => total + (valor ?? 0), 0);
+    if (Math.abs(suma - datos.montoTotal) > 1) {
+      mensajes.push('Subtotal, impuestos y propina no coinciden con el total detectado.');
+      inconsistente = true;
+    }
+  }
+
+  if (duplicada) {
+    mensajes.push('Ya existe un gasto registrado con este archivo o con el mismo NIT y número de factura.');
+  } else if (!inconsistente && !tieneDatosClave) {
+    mensajes.push('Faltan datos para evaluar la consistencia; requiere revisión manual.');
+  } else if (!inconsistente) {
+    mensajes.push('Los campos y montos detectados son consistentes entre sí.');
+  }
+
+  mensajes.push('No se consultó la DIAN ni otra fuente oficial; esto no confirma la autenticidad de la factura.');
+  return {
+    estado: duplicada ? 'duplicada' : inconsistente ? 'inconsistente' : tieneDatosClave ? 'datos_consistentes' : 'pendiente',
+    fuente: 'validacion_local',
+    verificacionOficial: false,
+    docHash: datos.archivoHash,
+    mensajes,
+  };
+}
+
+function fechaISOValida(fecha: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return false;
+  const fechaParseada = new Date(`${fecha}T00:00:00.000Z`);
+  return !Number.isNaN(fechaParseada.getTime()) && fechaParseada.toISOString().slice(0, 10) === fecha;
+}
 
 export interface ProductoFactura {
   cantidad: number;
@@ -43,16 +113,16 @@ export function parseInvoiceText(rawText: string) {
   const nitExtraido = nitMatch ? nitMatch[1].replace(/[^0-9]/g, '') : null;
 
   // 2. Detección CUFE / CUDS (Colombia)
-  const cufeMatch = rawText.match(/(?:CUFE|CUDS)[:\s]*([a-fA-F0-9]{64,96})/i);
+  const cufeMatch = rawText.match(/(?:CUFE|CUDE|CUDS)[:\s]*([a-fA-F0-9]{64,96})/i);
   const cufeExtraido = cufeMatch ? cufeMatch[1] : null;
 
   // 3. Extracción de Número de Factura
   const numFacturaMatch = rawText.match(/(?:FACTURA|N°|NUMERO|INVOICE|FAC)[:\s#]*([A-Z0-9\-]+)/i);
-  const numeroFactura = numFacturaMatch ? numFacturaMatch[1] : `FAC-${Date.now().toString().slice(-6)}`;
+  const numeroFactura = numFacturaMatch ? numFacturaMatch[1] : null;
 
   // 4. Extracción de Fecha
-  const fechaMatch = rawText.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})/);
-  const fechaFactura = fechaMatch ? fechaMatch[1] : new Date().toISOString().split('T')[0];
+  const fechaMatch = rawText.match(/\b(\d{4}[\/\-]\d{2}[\/\-]\d{2}|\d{2}[\/\-]\d{2}[\/\-]\d{4})\b/);
+  const fechaFactura = fechaMatch ? fechaMatch[1] : null;
 
   // 5. Extracción de Moneda y País
   let moneda = 'COP';
@@ -118,22 +188,28 @@ export function parseInvoiceText(rawText: string) {
   }
 
   // 8. Hash SHA-256 de seguridad para la factura
-  const docHash = crypto.createHash('sha256').update(rawText).digest('hex');
+  const textoHash = crypto.createHash('sha256').update(rawText).digest('hex');
+  const comercio = lines.find((line) => /[a-záéíóúñ]{3,}/i.test(line) && !/nit|tel|dir|calle|cra|carrera|factura|fecha|www/i.test(line))
+    ?.replace(/[^\p{L}\d\s&.-]/gu, '').trim().slice(0, 120) ?? null;
 
   // 9. Cálculo de confianza y estado visual
-  let confianza = 0.95;
+  let confianza = 0.5;
   const mensajesValidacion = [];
 
   if (!total || total <= 0) {
-    confianza -= 0.35;
     mensajesValidacion.push('No se pudo identificar un monto TOTAL válido.');
+  } else {
+    confianza += 0.35;
   }
   if (!nitExtraido) {
-    confianza -= 0.05;
     mensajesValidacion.push('NIT o Identificación fiscal no encontrada.');
+  } else {
+    confianza += 0.05;
   }
+  if (numeroFactura) confianza += 0.05;
+  if (fechaFactura) confianza += 0.05;
 
-  let estadoVisual = 'Verificada';
+  let estadoVisual = 'Pendiente';
   if (confianza < 0.90 && confianza >= 0.75) {
     estadoVisual = 'Estructura válida'; // Requiere confirmación manual
   } else if (confianza < 0.75 && (total ?? 0) > 0) {
@@ -143,27 +219,44 @@ export function parseInvoiceText(rawText: string) {
   }
 
   if (cufeExtraido) {
-    mensajesValidacion.push('CUFE electrónico colombiano validado correctamente.');
+    mensajesValidacion.push('Se detectó un CUFE/CUDE; su validez no ha sido consultada con una fuente oficial.');
+  }
+  if (subtotal !== null && total !== null && Math.abs(subtotal + impuestos + propina - total) > 1) {
+    estadoVisual = 'Inconsistente';
+    mensajesValidacion.push('Subtotal, impuestos y propina no coinciden con el total detectado.');
+  } else if (total && nitExtraido && numeroFactura && fechaFactura) {
+    estadoVisual = 'Datos consistentes (no verificada oficialmente)';
   }
 
   return {
     pais,
     moneda,
+    comercio,
     numeroFactura,
     nitFiscal: nitExtraido,
     cufe: cufeExtraido,
-    fecha: fechaFactura,
+    fecha: normalizarFechaFactura(fechaFactura),
     subtotal: subtotal || total,
     impuestos,
     propina,
     total: total || 0,
-    docHash,
+    textoHash,
     confianza: Math.round(confianza * 100) / 100,
     estadoVisual,
     requiereConfirmacionManual: confianza < 0.90,
     productos,
     mensajesValidacion
   };
+}
+
+function normalizarFechaFactura(fecha: string | null): string | null {
+  if (!fecha) return null;
+  const iso = fecha.match(/^(\d{4})[/-](\d{2})[/-](\d{2})$/);
+  const local = fecha.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  const normalizada = iso ? `${iso[1]}-${iso[2]}-${iso[3]}`
+    : local ? `${local[3]}-${local[2]}-${local[1]}`
+      : null;
+  return normalizada && fechaISOValida(normalizada) ? normalizada : null;
 }
 
 export function parseColombianAmount(str: string | number | null | undefined): number {

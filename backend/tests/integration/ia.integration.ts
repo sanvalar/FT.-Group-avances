@@ -11,7 +11,7 @@ const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(
 const PDF = Buffer.from('%PDF-1.7\n%prueba');
 
 const datosEjemplo: DatosFactura = {
-  esFactura: true, comercio: 'Almacenes Éxito', nit: '890.900.608-9', numeroFactura: 'FE-1', fecha: '2026-10-20',
+  esFactura: true, comercio: 'Almacenes Éxito', nit: '890.900.608-9', numeroFactura: 'FE-1', cufe: null, fecha: '2026-10-20',
   montoTotal: 87450, subtotal: 73487, impuestos: 13963, propina: null, moneda: 'COP', categoria: 'alimentacion',
   descripcionSugerida: 'Mercado en Éxito', items: [], confianza: 94, observaciones: null,
 };
@@ -48,7 +48,12 @@ describe('Integración · Escaneo de facturas con IA (/api/ia)', () => {
 
     const imagen = await request(app).post('/api/ia/facturas').set(bearer(sesion)).set('Content-Type', 'image/jpeg').send(JPEG);
     expect(imagen.status).toBe(200);
-    expect(imagen.body.datos).toEqual(datosEjemplo);
+    expect(imagen.body.datos).toMatchObject(datosEjemplo);
+    expect(imagen.body.datos.verificacion).toMatchObject({
+      estado: 'datos_consistentes',
+      fuente: 'validacion_local',
+      verificacionOficial: false,
+    });
     expect(extractorFalso.extraer).toHaveBeenLastCalledWith(JPEG, 'image/jpeg');
 
     const pdf = await request(app).post('/api/ia/facturas').set(bearer(sesion)).set('Content-Type', 'application/pdf').send(PDF);

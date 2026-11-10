@@ -9,6 +9,7 @@ import {
   ValidacionError,
 } from '../../../../../domain/errors/DomainErrors';
 import { CrearGastoDatos, GrupoGastoRepository, GrupoResumen } from '../../../../../domain/ports/out/GrupoGastoRepository';
+import { verificarDatosFactura } from '../../../../../domain/services/verificadorFacturaInternacional';
 
 export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
   constructor(private readonly pool: Pool, private readonly poolHistorico: Pool) {}
@@ -174,6 +175,31 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
   async crearGasto(actorId: number, grupoId: number, datos: CrearGastoDatos): Promise<unknown> {
     return this.enTransaccion(async (client) => {
       await this.exigirMiembro(client, actorId, grupoId, true);
+      const pagadorId = datos.pagadorId ?? actorId;
+      const pagadorActivo = await client.query(
+        `SELECT 1 FROM miembro_grupo WHERE grupo_id = $1 AND usuario_id = $2 AND estado = 'activo'`,
+        [grupoId, pagadorId],
+      );
+      if (pagadorActivo.rowCount === 0) {
+        throw new ValidacionError('El pagador debe pertenecer al grupo y estar activo.');
+      }
+      let duplicada = false;
+      let nitNormalizado: string | null = null;
+      let numeroFacturaNormalizado: string | null = null;
+      if (datos.comprobante) {
+        nitNormalizado = datos.comprobante.nit?.replace(/\D/g, '') || null;
+        numeroFacturaNormalizado = datos.comprobante.numeroFactura?.trim().toUpperCase() || null;
+        const existente = await client.query(
+          `SELECT EXISTS (
+             SELECT 1 FROM comprobante_factura
+             WHERE archivo_hash = $1
+                OR ($2::varchar IS NOT NULL AND $3::varchar IS NOT NULL
+                    AND nit_normalizado = $2 AND numero_factura_normalizado = $3)
+           ) AS duplicada`,
+          [datos.comprobante.archivoHash, nitNormalizado, numeroFacturaNormalizado],
+        );
+        duplicada = existente.rows[0].duplicada;
+      }
       const usuarioIds = datos.participaciones.map(({ usuarioId }) => usuarioId);
       const miembros = await client.query(
         `SELECT usuario_id FROM miembro_grupo
@@ -188,15 +214,36 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
         `INSERT INTO gasto (grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria, tipo_division)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria, tipo_division, fecha_registro`,
-        [grupoId, actorId, datos.descripcion, datos.montoTotal, datos.fechaGasto, datos.categoria, datos.tipoDivision],
+        [grupoId, pagadorId, datos.descripcion, datos.montoTotal, datos.fechaGasto, datos.categoria, datos.tipoDivision],
       );
       const gasto = gastoResultado.rows[0];
+      let comprobanteVerificacion;
+      if (datos.comprobante) {
+        comprobanteVerificacion = verificarDatosFactura(datos.comprobante, duplicada);
+        await client.query(
+          `INSERT INTO comprobante_factura
+            (gasto_id, archivo_hash, comercio, nit_normalizado, numero_factura_normalizado,
+             cufe, fecha_factura, monto_total, estado_verificacion)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            gasto.id,
+            datos.comprobante.archivoHash,
+            datos.comprobante.comercio,
+            nitNormalizado,
+            numeroFacturaNormalizado,
+            datos.comprobante.cufe,
+            datos.comprobante.fecha,
+            datos.comprobante.montoTotal,
+            comprobanteVerificacion.estado,
+          ],
+        );
+      }
 
       for (const participacion of datos.participaciones) {
         await client.query(
           `INSERT INTO participacion_gasto (gasto_id, usuario_id, monto_asignado, estado_pago, fecha_pago)
            VALUES ($1, $2, $3, $4, CASE WHEN $4::varchar = 'pagado' THEN NOW() ELSE NULL END)`,
-          [gasto.id, participacion.usuarioId, participacion.montoAsignado, participacion.usuarioId === actorId ? 'pagado' : 'pendiente'],
+          [gasto.id, participacion.usuarioId, participacion.montoAsignado, participacion.usuarioId === pagadorId ? 'pagado' : 'pendiente'],
         );
       }
 
@@ -209,7 +256,7 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
       );
       await this.recalcularBalances(client, grupoId);
 
-      return { ...gasto, participaciones: datos.participaciones };
+      return { ...gasto, participaciones: datos.participaciones, comprobanteVerificacion };
     });
   }
 
@@ -218,6 +265,13 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
     const resultado = await this.pool.query(
       `SELECT g.id, g.grupo_id, g.pagador_id, u.nombre AS pagador, g.descripcion,
               g.monto_total, g.fecha_gasto, g.categoria, g.tipo_division, g.fecha_registro,
+              (SELECT json_build_object(
+                'archivoHash', cf.archivo_hash, 'comercio', cf.comercio, 'nit', cf.nit_normalizado,
+                'numeroFactura', cf.numero_factura_normalizado, 'cufe', cf.cufe,
+                'fecha', cf.fecha_factura, 'montoTotal', cf.monto_total,
+                'estado', cf.estado_verificacion, 'fuente', 'validacion_local',
+                'verificacionOficial', FALSE
+              ) FROM comprobante_factura cf WHERE cf.gasto_id = g.id) AS comprobante_verificacion,
               COALESCE(json_agg(json_build_object(
                 'usuarioId', p.usuario_id, 'nombre', up.nombre, 'montoAsignado', p.monto_asignado,
                 'estadoPago', p.estado_pago, 'fechaPago', p.fecha_pago

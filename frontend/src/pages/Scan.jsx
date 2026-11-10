@@ -8,7 +8,7 @@ import { Alert, Empty, Loader, PageHeader } from '../components/ui'
 import Icon from '../components/Icon'
 import ExpenseForm from '../components/ExpenseForm'
 import CameraCapture from '../components/CameraCapture'
-import { analizarFacturaConIa } from '../services/iaFacturas'
+import { analizarFacturaConIa, hashArchivoFactura, verificarFacturaOCR } from '../services/iaFacturas'
 
 const STEPS = [
   { id: 'pre', icon: 'camera', title: 'Captura y preprocesamiento', text: 'Corrección de contraste, escala de grises y ruido' },
@@ -64,7 +64,16 @@ export default function Scan({ user }) {
       if (await intentarIa(f)) return
       // Los PDF se adjuntan, pero los datos se ingresan manualmente.
       setStep(3)
-      setResult({ monto: 0, fecha: undefined, comercio: '', categoria: 'otro', confianza: null, pdf: true })
+      const docHash = await hashArchivoFactura(f)
+      setResult({
+        monto: 0, fecha: undefined, comercio: '', categoria: 'otro', confianza: null, pdf: true, docHash,
+        verificacion: {
+          estado: 'pendiente',
+          fuente: 'validacion_local',
+          verificacionOficial: false,
+          mensajes: ['El PDF no se pudo analizar. No se consultó la DIAN ni otra fuente oficial.'],
+        },
+      })
       return
     }
     setPreview(URL.createObjectURL(f))
@@ -76,7 +85,28 @@ export default function Scan({ user }) {
       const { text, confidence } = await recognize(canvas, setProgress)
       setStep(2)
       const campos = extractFields(text)
-      setResult({ ...campos, confianza: Math.round(confidence), texto: text })
+      let resultadoVerificacion
+      let docHash
+      try {
+        const verificacion = await verificarFacturaOCR(f, text)
+        resultadoVerificacion = verificacion.verificacion
+        docHash = verificacion.archivoHash
+        campos.nit = verificacion.datos.nit
+        campos.numeroFactura = verificacion.datos.numeroFactura
+        campos.cufe = verificacion.datos.cufe
+        campos.subtotal = verificacion.datos.subtotal
+        campos.impuestos = verificacion.datos.impuestos
+        campos.propina = verificacion.datos.propina
+      } catch (verificationError) {
+        docHash = verificationError.archivoHash || await hashArchivoFactura(f)
+        resultadoVerificacion = {
+          estado: 'pendiente',
+          fuente: 'validacion_local',
+          verificacionOficial: false,
+          mensajes: ['No fue posible consultar duplicados en el servidor. No se verificó oficialmente.'],
+        }
+      }
+      setResult({ ...campos, confianza: Math.round(confidence), texto: text, docHash, verificacion: resultadoVerificacion, motor: 'ocr' })
       setStep(3)
     } catch (err) {
       console.error(err)
@@ -138,7 +168,7 @@ export default function Scan({ user }) {
                 <Alert type="warning">{error}</Alert>
                 {result && !result.pdf && result.confianza !== null && (
                   <div className="ocr-summary">
-                    <span className="pill pill-ia"><Icon name="sparkles" size={14} />IA · confianza {result.confianza}%</span>
+                    <span className="pill pill-ia"><Icon name="sparkles" size={14} />{result.motor === 'ia' ? 'IA' : 'OCR'} · lectura {result.confianza}%</span>
                     <p className="muted">Detectado: <strong className="text">{result.comercio || 'comercio no identificado'}</strong>
                       {result.monto > 0 && <> · {money(result.monto)}</>} · {categoria(result.categoria).label}. Revisa y corrige antes de guardar.</p>
                   </div>
@@ -166,10 +196,25 @@ export default function Scan({ user }) {
                     {result.observaciones && <small className="muted">{result.observaciones}</small>}
                   </div>
                 )}
+                {result?.verificacion && (
+                  <Alert type="warning">
+                    <strong>Verificación: {result.verificacion.estado.replaceAll('_', ' ')}.</strong>{' '}
+                    {result.verificacion.mensajes?.join(' ')}
+                  </Alert>
+                )}
                 {result?.pdf && <p className="muted">Los PDF se adjuntan como comprobante; completa los datos del gasto.</p>}
                 <ExpenseForm user={user} grupos={grupos} formId="scan-form" origen="ocr"
                   initial={{ descripcion: result?.descripcion || result?.comercio, monto: result?.monto || '', fecha: result?.fecha, categoria: result?.categoria }}
-                  recibo={{ imagen_url: file.name, monto_extraido: result?.monto || null, fecha_extraida: result?.fecha || null, comercio_extraido: result?.comercio || null, categoria_sugerida: result?.categoria, confianza_ocr: result?.confianza }}
+                  recibo={{
+                    imagen_url: file.name, docHash: result?.docHash,
+                    monto_extraido: result?.monto || null, fecha_extraida: result?.fecha || null,
+                    comercio_extraido: result?.comercio || null, categoria_sugerida: result?.categoria,
+                    confianza_ocr: result?.confianza, nit: result?.nit || null,
+                    numero_factura: result?.numeroFactura || null, cufe: result?.cufe || null,
+                    subtotal: result?.subtotal ?? null, impuestos: result?.impuestos ?? null,
+                    propina: result?.propina ?? null,
+                    verificacion: result?.verificacion || null,
+                  }}
                   onSavingChange={setSaving} onSaved={() => navigate('/gastos')} />
                 <div className="form-actions">
                   <button className="btn btn-ghost" onClick={reset}>Descartar</button>
