@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { grupoGastoController } from '../../../../config/container';
-import { autenticar } from '../middlewares/authMiddleware';
+import { autenticar, autorizarRoles } from '../middlewares/authMiddleware';
 import { validarBody, validarParams } from '../middlewares/validate';
 import {
   crearGastoSchema,
@@ -13,7 +13,7 @@ import {
 
 const router = Router();
 
-router.use(autenticar);
+router.use(autenticar, autorizarRoles('usuario'));
 router.get('/', grupoGastoController.listarGrupos);
 router.post('/', validarBody(crearGrupoSchema), grupoGastoController.crearGrupo);
 router.get('/:grupoId/integrantes', validarParams(grupoIdParamsSchema), grupoGastoController.listarIntegrantes);

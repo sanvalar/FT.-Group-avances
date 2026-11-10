@@ -50,7 +50,7 @@ router.patch('/moderacion/lecciones/:leccionId/publicar', autorizarRoles('superv
   }
 });
 
-router.get('/', async (req: RequestAutenticado, res, next) => {
+router.get('/', autorizarRoles('usuario'), async (req: RequestAutenticado, res, next) => {
   try {
     const lecciones = await pool.query(
       `SELECT l.*, p.estado, COALESCE(p.puntaje,0) puntaje, COALESCE(p.intentos,0) intentos
@@ -78,7 +78,7 @@ router.get('/', async (req: RequestAutenticado, res, next) => {
   }
 });
 
-router.post('/progreso', async (req: RequestAutenticado, res, next) => {
+router.post('/progreso', autorizarRoles('usuario'), async (req: RequestAutenticado, res, next) => {
   try {
     const { leccionId, puntaje } = req.body as { leccionId: string; puntaje: number };
     if (!leccionId || !Number.isFinite(puntaje) || puntaje < 0 || puntaje > 100) {
@@ -103,7 +103,7 @@ router.post('/progreso', async (req: RequestAutenticado, res, next) => {
   }
 });
 
-router.post('/presupuestos', async (req: RequestAutenticado, res, next) => {
+router.post('/presupuestos', autorizarRoles('usuario'), async (req: RequestAutenticado, res, next) => {
   try {
     const { categoria, periodo, montoLimite } = req.body;
     if (!categoria || !/^\d{4}-\d{2}$/.test(periodo) || !Number.isFinite(Number(montoLimite))) {
@@ -122,7 +122,7 @@ router.post('/presupuestos', async (req: RequestAutenticado, res, next) => {
   }
 });
 
-router.post('/metas', async (req: RequestAutenticado, res, next) => {
+router.post('/metas', autorizarRoles('usuario'), async (req: RequestAutenticado, res, next) => {
   try {
     const { titulo, montoObjetivo, montoActual = 0, fechaLimite } = req.body;
     if (!titulo || !Number.isFinite(Number(montoObjetivo)) || Number(montoObjetivo) <= 0) {
@@ -139,7 +139,7 @@ router.post('/metas', async (req: RequestAutenticado, res, next) => {
   }
 });
 
-router.patch('/metas/:metaId', async (req: RequestAutenticado, res, next) => {
+router.patch('/metas/:metaId', autorizarRoles('usuario'), async (req: RequestAutenticado, res, next) => {
   try {
     const montoActual = Number(req.body.montoActual);
     if (!Number.isFinite(montoActual) || montoActual < 0) {

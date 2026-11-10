@@ -70,7 +70,7 @@ function Etiqueta({ mapa, valor, prefijo }) {
 export default function Soporte({ user }) {
   const esPersonal = ['moderador', 'supervisor'].includes(user?.rol)
 
-  const [vista, setVista] = useState('mios')
+  const [vista, setVista] = useState(esPersonal ? 'bandeja' : 'mios')
   const [estadoFiltro, setEstadoFiltro] = useState('')
   const [tickets, setTickets] = useState([])
   const [total, setTotal] = useState(0)

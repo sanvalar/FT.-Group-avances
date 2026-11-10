@@ -2,10 +2,10 @@ import crypto from 'crypto';
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { pool } from '../../../../adapters/out/persistence/postgres/db';
-import { autenticar, RequestAutenticado } from '../middlewares/authMiddleware';
+import { autenticar, autorizarRoles, RequestAutenticado } from '../middlewares/authMiddleware';
 
 const router = Router();
-router.use(autenticar);
+router.use(autenticar, autorizarRoles('usuario'));
 
 router.post('/', async (req: RequestAutenticado, res, next) => {
   try {

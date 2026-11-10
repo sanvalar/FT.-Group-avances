@@ -57,8 +57,10 @@ export default function Layout({ user, onLogout, children }) {
       ]
     : user?.rol === 'moderador'
       ? [
-        ...NAV_BASE,
+        { to: '/moderacion', label: 'Panel de moderación', short: 'Panel', icon: 'grid' },
         { to: '/administracion', label: 'Administración', short: 'Admin', icon: 'shield' },
+        { to: '/soporte', label: 'Soporte', short: 'Soporte', icon: 'ticket' },
+        { to: '/educacion', label: 'Moderación educativa', short: 'Educación', icon: 'brain' },
       ]
       : NAV_BASE
 

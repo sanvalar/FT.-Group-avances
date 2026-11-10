@@ -18,6 +18,7 @@ import EstadoSistema from './pages/EstadoSistema'
 import BrandMark from './components/BrandMark'
 import EducacionFinanciera from './pages/EducacionFinanciera'
 import Supervision from './pages/Supervision'
+import Moderacion from './pages/Moderacion'
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -90,12 +91,14 @@ export default function App() {
 
   if (loading) return <div className="splash"><BrandMark /><span className="spinner" /></div>
 
-  const page = el => <Protected user={user} onLogout={logout}>{el}</Protected>
-  const userModulePage = el => <Protected user={user} onLogout={logout} exceptRoles={['supervisor']} redirectTo="/supervision">{el}</Protected>
-  const staffPage = el => <Protected user={user} onLogout={logout} roles={['moderador', 'supervisor']}>{el}</Protected>
-  const supervisorPage = el => <Protected user={user} onLogout={logout} roles={['supervisor']}>{el}</Protected>
   const props = { user }
-  const home = user?.rol === 'supervisor' ? '/supervision' : user?.rol === 'moderador' ? '/administracion' : '/panel'
+  const home = user?.rol === 'supervisor' ? '/supervision' : user?.rol === 'moderador' ? '/moderacion' : '/panel'
+  const page = el => <Protected user={user} onLogout={logout}>{el}</Protected>
+  const userModulePage = el => <Protected user={user} onLogout={logout} exceptRoles={['supervisor', 'moderador']} redirectTo={home}>{el}</Protected>
+  const staffPage = el => <Protected user={user} onLogout={logout} roles={['moderador', 'supervisor']}>{el}</Protected>
+  const moderatorPage = el => <Protected user={user} onLogout={logout} roles={['moderador']}>{el}</Protected>
+  const supervisorPage = el => <Protected user={user} onLogout={logout} roles={['supervisor']}>{el}</Protected>
+  const supportPage = <Protected user={user} onLogout={logout} exceptRoles={['supervisor']} redirectTo="/supervision"><Soporte {...props} /></Protected>
 
   return (
     <ErrorBoundary>
@@ -110,12 +113,13 @@ export default function App() {
         <Route path="/educacion" element={page(<EducacionFinanciera {...props} />)} />
         <Route path="/indicadores" element={<Navigate to="/analisis" replace />} />
         <Route path="/escanear" element={userModulePage(<Scan {...props} />)} />
-        <Route path="/soporte" element={userModulePage(<Soporte {...props} />)} />
         <Route path="/perfil" element={page(<Profile user={user} setUser={setUser} onLogout={logout} />)} />
+        <Route path="/moderacion" element={moderatorPage(<Moderacion />)} />
         <Route path="/supervision" element={supervisorPage(<Supervision />)} />
         <Route path="/administracion" element={staffPage(<Administracion {...props} />)} />
         <Route path="/auditoria" element={supervisorPage(<Auditoria />)} />
         <Route path="/estado-sistema" element={supervisorPage(<EstadoSistema />)} />
+        <Route path="/soporte" element={supportPage} />
         <Route path="*" element={<Navigate to={user ? home : '/login'} replace />} />
       </Routes>
     </ErrorBoundary>

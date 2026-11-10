@@ -1,7 +1,7 @@
 import express, { NextFunction, Response, Router } from 'express';
 import crypto from 'crypto';
 import { env } from '../../../../config/env';
-import { autenticar, RequestAutenticado } from '../middlewares/authMiddleware';
+import { autenticar, autorizarRoles, RequestAutenticado } from '../middlewares/authMiddleware';
 import { ClaudeFacturaExtractor } from '../../../out/ia/ClaudeFacturaExtractor';
 import { OpenAIFacturaExtractor } from '../../../out/ia/OpenAIFacturaExtractor';
 import { IaNoDisponibleError } from '../../../out/ia/facturaIaComun';
@@ -95,13 +95,14 @@ export function firmaCoincide(archivo: Buffer, tipo: TipoArchivoFactura): boolea
 
 const router = Router();
 
-router.get('/estado', autenticar, (_req, res) => {
+router.get('/estado', autenticar, autorizarRoles('usuario'), (_req, res) => {
   res.json({ disponible: extractor !== null });
 });
 
 router.post(
   '/facturas',
   autenticar,
+  autorizarRoles('usuario'),
   (req, res, next) => {
     if (!extractor) {
       res.status(503).json({ error: 'IaNoConfigurada', mensaje: 'El escaneo con IA no está configurado en el servidor.' });

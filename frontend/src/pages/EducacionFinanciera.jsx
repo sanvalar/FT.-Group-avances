@@ -62,7 +62,7 @@ export default function EducacionFinanciera({ user }) {
 
   const load = async () => {
     try {
-      if (user?.rol === 'supervisor') {
+      if (['moderador', 'supervisor'].includes(user?.rol)) {
         setModeration(await educationApi.moderation())
         return
       }
@@ -94,11 +94,16 @@ export default function EducacionFinanciera({ user }) {
     } catch (e) { setError(e.message) }
   }
 
-  if (user?.rol === 'supervisor') {
+  if (['moderador', 'supervisor'].includes(user?.rol)) {
     if (!moderation) return error ? <Alert>{error}</Alert> : <Loader />
     return (
       <>
-        <PageHeader title="Control educativo" subtitle="Supervisa la publicación y participación global de la academia." />
+        <PageHeader
+          title={user.rol === 'supervisor' ? 'Control educativo' : 'Moderación educativa'}
+          subtitle={user.rol === 'supervisor'
+            ? 'Supervisa la publicación y participación global de la academia.'
+            : 'Revisa la participación agregada y el estado de las lecciones.'}
+        />
         <Alert type="info">{error}</Alert>
         <ModerationPanel moderation={moderation} user={user} busy={busy} onTogglePublication={togglePublication} />
       </>

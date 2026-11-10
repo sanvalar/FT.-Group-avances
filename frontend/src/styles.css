@@ -203,6 +203,10 @@ h1, h2, h3 { margin: 0; }
 .supervision-expense-main { flex: 1; }
 .supervision-expense-amounts { display: grid; gap: 3px; justify-items: end; text-align: right; }
 .supervision-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 14px; }
+.moderation-modules { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.moderation-module { display: grid; justify-items: start; align-content: start; gap: 10px; transition: border-color .15s, transform .15s; }
+.moderation-module:hover { border-color: var(--accent); transform: translateY(-2px); }
+.moderation-module .link { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; }
 .audit-summary {
   display: flex; align-items: center; gap: 14px; padding: 16px 18px; margin-bottom: 18px;
   border: 1px solid var(--line-2); border-radius: 14px; background: linear-gradient(110deg, var(--surface), var(--bg-2));

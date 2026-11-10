@@ -155,6 +155,12 @@ describe('Integración · Seguridad', () => {
       ['get', '/api/administracion/usuarios', { usuario: 403, moderador: 200, supervisor: 200 }],
       ['get', '/api/auditoria', { usuario: 403, moderador: 403, supervisor: 200 }],
       ['get', '/api/estado', { usuario: 403, moderador: 403, supervisor: 200 }],
+      ['get', '/api/grupos', { usuario: 200, moderador: 403, supervisor: 403 }],
+      ['get', '/api/reportes/resumen', { usuario: 200, moderador: 403, supervisor: 403 }],
+      ['get', '/api/notificaciones', { usuario: 200, moderador: 403, supervisor: 403 }],
+      ['get', '/api/educacion', { usuario: 200, moderador: 403, supervisor: 403 }],
+      ['get', '/api/ia/estado', { usuario: 200, moderador: 403, supervisor: 403 }],
+      ['get', '/api/contratos/no-existe', { usuario: 404, moderador: 403, supervisor: 403 }],
     ];
 
     it.each(casos)('%s %s respeta la matriz de roles', async (metodo, ruta, esperado) => {
@@ -162,6 +168,20 @@ describe('Integración · Seguridad', () => {
       for (const [rol, estado] of Object.entries(esperado)) {
         const respuesta = await (request(app) as unknown as Record<string, (r: string) => request.Test>)[metodo](ruta).set(bearer(sesiones[rol]));
         expect([rol, respuesta.status]).toEqual([rol, estado]);
+      }
+    });
+
+    it('GraphQL también reserva los grupos a usuarios comunes', async () => {
+      for (const [rol, sesion] of Object.entries({ usuario, moderador, supervisor })) {
+        const respuesta = await request(app)
+          .post('/graphql')
+          .set(bearer(sesion))
+          .send({ query: '{ misGrupos { id } }' });
+        if (rol === 'usuario') {
+          expect(respuesta.body.errors).toBeUndefined();
+        } else {
+          expect(respuesta.body.errors?.[0]?.message).toContain('permisos');
+        }
       }
     });
 

@@ -11,6 +11,12 @@ import {
 import { pool, poolHistorico } from '../adapters/out/persistence/postgres/db';
 import { administracionController, grupoGastoController } from './container';
 
+function exigirRoles(usuario: { rol: string } | undefined, ...roles: string[]): void {
+  if (!usuario || !roles.includes(usuario.rol)) {
+    throw new Error('No tienes permisos para consultar este módulo.');
+  }
+}
+
 // --- ENUMS & TYPES ---
 
 const RolUsuarioEnum = new GraphQLEnumType({
@@ -94,6 +100,7 @@ const RootQuery = new GraphQLObjectType({
       },
       resolve: async (_parent, args, context) => {
         if (!context?.usuario) throw new Error('No autenticado para consultar usuarios.');
+        exigirRoles(context.usuario, 'moderador', 'supervisor');
         
         // Si pide activos exclusivamente, consultamos solo el pool de activos
         if (args.estado === 'activo') {
@@ -139,7 +146,7 @@ const RootQuery = new GraphQLObjectType({
     misGrupos: {
       type: new GraphQLList(GrupoType),
       resolve: async (_parent, _args, context) => {
-        if (!context?.usuario) throw new Error('Se requiere autenticacion JWT.');
+        exigirRoles(context?.usuario, 'usuario');
         const res = await pool.query(
           `SELECT g.id, g.nombre, g.descripcion, m.rol, g.fecha_creacion AS "fechaCreacion",
                   COUNT(mi.id)::int AS "miembrosActivos"
@@ -158,7 +165,7 @@ const RootQuery = new GraphQLObjectType({
     gruposArchivados: {
       type: new GraphQLList(GrupoType),
       resolve: async (_parent, _args, context) => {
-        if (!context?.usuario) throw new Error('Se requiere autenticacion JWT.');
+        exigirRoles(context?.usuario, 'usuario');
         try {
           const res = await poolHistorico.query(
             `SELECT id, nombre, descripcion, 'archivado' AS estado, fecha_creacion AS "fechaCreacion"
@@ -201,7 +208,7 @@ const RootMutation = new GraphQLObjectType({
         grupoId: { type: new GraphQLNonNull(GraphQLID) },
       },
       resolve: async (_parent, args, context) => {
-        if (!context?.usuario) throw new Error('No autorizado.');
+        exigirRoles(context?.usuario, 'usuario');
         const id = parseInt(args.grupoId, 10);
 
         // 1. Obtener datos del grupo activo

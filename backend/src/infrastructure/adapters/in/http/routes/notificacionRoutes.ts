@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { grupoGastoController } from '../../../../config/container';
-import { autenticar } from '../middlewares/authMiddleware';
+import { autenticar, autorizarRoles } from '../middlewares/authMiddleware';
 import { validarParams } from '../middlewares/validate';
 import { notificacionParamsSchema } from '../validators/grupoValidators';
 
 const router = Router();
-router.use(autenticar);
+router.use(autenticar, autorizarRoles('usuario'));
 router.get('/', grupoGastoController.listarNotificaciones);
 router.patch('/:notificacionId/leida', validarParams(notificacionParamsSchema), grupoGastoController.marcarNotificacionLeida);
 

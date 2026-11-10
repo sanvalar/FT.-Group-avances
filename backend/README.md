@@ -138,6 +138,8 @@ La migración `004_roles_usuario.sql` asigna el rol `usuario` por defecto a las 
 
 Los cambios no permiten gestionar la propia cuenta desde administración. La autorización usa el rol actual consultado en PostgreSQL, por lo que cambiar un rol o bloquear una cuenta invalida el permiso de la sesión inmediatamente.
 
+Los módulos financieros (`/api/grupos`, reportes, notificaciones, escaneo IA, contratos y educación personal) y las consultas de grupos en GraphQL son exclusivos del rol `usuario`. Los supervisores acceden a la consulta financiera de solo lectura y moderadores a soporte y estadísticas educativas agregadas; ambos accesos se validan en el backend.
+
 Para crear o restablecer las cuentas de demostración ejecuta `npm run seed:roles` después de las migraciones. Este comando está bloqueado cuando `NODE_ENV=production`:
 
 | Rol | Correo | Contraseña |

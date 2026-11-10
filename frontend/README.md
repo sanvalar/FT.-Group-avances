@@ -17,10 +17,13 @@ Frontend web (React + Vite) de FT. GROUP, basado en los prototipos de las versio
 | `/administracion` | Gestión de cuentas: consulta de usuarios y acciones permitidas por rol | **Backend real** |
 | `/auditoria` | Bitácora paginada y filtrable de actividad | **Solo supervisor** |
 | `/supervision` | Consulta de solo lectura de grupos y actividad financiera por cuenta | **Solo supervisor** |
+| `/moderacion` | Resumen y accesos de moderación de cuentas, soporte y academia | **Solo moderador** |
 
 La ruta de administración solo está disponible para `moderador` y `supervisor`. El moderador puede cambiar estado a cuentas con rol `usuario`; el supervisor puede cambiar estados y asignar roles. El backend vuelve a comprobar el rol y el estado actual de la cuenta en cada petición protegida.
 
 El menú del supervisor es independiente del menú financiero común e incluye Supervisión de usuarios, Administración, Auditoría, Estado del sistema y Control educativo. Las rutas financieras de usuario están bloqueadas para ese rol. La vista de supervisión permite revisar grupos y gastos asociados a una cuenta, con paginación y sin acciones de escritura; el backend restringe esta consulta al supervisor.
+
+El menú del moderador incluye Panel de moderación, Administración, Soporte y Moderación educativa. No muestra ni permite abrir los módulos financieros de usuario común. En educación solo consulta indicadores agregados; la publicación de lecciones sigue reservada al supervisor. En soporte, la bandeja de casos se abre por defecto. El backend también rechaza el acceso de moderadores y supervisores a los endpoints financieros comunes.
 
 La auditoría está disponible únicamente para supervisores. Registra solicitudes autenticadas del backend y las acciones de escritura de la demostración local. No almacena contraseñas, tokens ni datos de formularios.
 
