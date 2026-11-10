@@ -2,7 +2,7 @@ import { crearNotificationsApp } from './notificationsApp';
 import { env } from '../infrastructure/config/env';
 import { verificarConexionBD } from '../infrastructure/adapters/out/persistence/postgres/db';
 
-const PORT = process.env.PORT || 3004;
+const PORT = Number(process.env.PORT ?? 3004);
 
 async function bootstrap() {
   try {
@@ -14,8 +14,8 @@ async function bootstrap() {
   }
 
   const app = crearNotificationsApp();
-  app.listen(PORT, () => {
-    console.log(`[NOTIFICATIONS-SERVICE] Escuchando en http://localhost:${PORT}`);
+  app.listen(PORT, env.serviceHost, () => {
+    console.log(`[NOTIFICATIONS-SERVICE] Escuchando en http://${env.serviceHost}:${PORT}`);
   });
 }
 

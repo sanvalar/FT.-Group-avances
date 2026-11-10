@@ -8,7 +8,12 @@ export class GrupoGastoController {
 
   crearGrupo = async (req: RequestAutenticado & { body: CrearGrupoInput }, res: Response, next: NextFunction) => {
     try {
-      const grupo = await this.service.crearGrupo(req.usuario!.id, req.body.nombre, req.body.descripcion);
+      const grupo = await this.service.crearGrupo(
+        req.usuario!.id,
+        req.body.nombre,
+        req.body.descripcion,
+        req.body.integrantes,
+      );
       res.status(201).json({ grupo });
     } catch (error) {
       next(error);
@@ -31,9 +36,10 @@ export class GrupoGastoController {
     }
   };
 
-  agregarMiembro = async (req: RequestAutenticado & { body: { usuarioId: number } }, res: Response, next: NextFunction) => {
+  agregarMiembro = async (req: RequestAutenticado & { body: { usuarioId?: number; email?: string } }, res: Response, next: NextFunction) => {
     try {
-      await this.service.agregarMiembro(req.usuario!.id, Number(req.params.grupoId), req.body.usuarioId);
+      const integrante = req.body.usuarioId ?? req.body.email!;
+      await this.service.agregarMiembro(req.usuario!.id, Number(req.params.grupoId), integrante);
       res.status(204).send();
     } catch (error) {
       next(error);
@@ -70,9 +76,62 @@ export class GrupoGastoController {
     }
   };
 
+  eliminarGasto = async (req: RequestAutenticado, res: Response, next: NextFunction) => {
+    try {
+      await this.service.eliminarGasto(req.usuario!.id, Number(req.params.gastoId));
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  };
+
   registrarPago = async (req: RequestAutenticado, res: Response, next: NextFunction) => {
     try {
-      await this.service.registrarPago(req.usuario!.id, Number(req.params.gastoId));
+      const liquidacion = await this.service.registrarPago(req.usuario!.id, Number(req.params.gastoId));
+      res.status(201).json({ liquidacion });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  listarLiquidacionesPendientes = async (req: RequestAutenticado, res: Response, next: NextFunction) => {
+    try {
+      res.status(200).json({
+        liquidaciones: await this.service.listarLiquidacionesPendientes(
+          req.usuario!.id,
+          Number(req.params.grupoId),
+        ),
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  reportarLiquidacion = async (
+    req: RequestAutenticado & { body: { acreedorId: number; monto: number } },
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const liquidacion = await this.service.reportarLiquidacion(
+        req.usuario!.id,
+        Number(req.params.grupoId),
+        req.body.acreedorId,
+        req.body.monto,
+      );
+      res.status(201).json({ liquidacion });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  confirmarLiquidacion = async (req: RequestAutenticado, res: Response, next: NextFunction) => {
+    try {
+      await this.service.confirmarLiquidacion(
+        req.usuario!.id,
+        Number(req.params.grupoId),
+        Number(req.params.liquidacionId),
+      );
       res.status(204).send();
     } catch (error) {
       next(error);

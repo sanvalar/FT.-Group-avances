@@ -76,8 +76,9 @@ npm install
 
 # 2) Configurar variables de entorno
 cp .env.example .env
-# Editar .env: como mínimo, cambia JWT_SECRET por un valor propio.
-#   Puedes generar uno con: openssl rand -base64 48
+# Editar .env: configura JWT_SECRET, JWT_ISSUER y JWT_AUDIENCE.
+#   Genera JWT_SECRET en Windows o macOS/Linux con:
+node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
 
 # 3) Levantar PostgreSQL
 #    Opción A: con Docker (recomendado)
@@ -102,6 +103,14 @@ curl http://localhost:3000/health
 ```
 
 ### Para producción
+
+Configura `JWT_SECRET` con un valor aleatorio nuevo (no reutilices el de
+desarrollo), y define `JWT_ISSUER` y `JWT_AUDIENCE` explícitamente. En
+producción el backend rechaza valores de ejemplo y tokens que no coincidan
+con esos claims. Los procesos `micro:*` escuchan solo en `127.0.0.1` por
+defecto; define `SERVICE_HOST` únicamente si deben ser accesibles en una red
+privada y protégelos con reglas de red/firewall. No los expongas directamente
+a Internet.
 
 ```bash
 npm run build      # compila TypeScript a dist/
@@ -209,7 +218,7 @@ Se crean dos proyectos desde el mismo repositorio:
 2. **Frontend:** Root Directory `frontend`, framework Vite. `vercel.json` configura la compilación y el fallback de las rutas React.
 3. Crea una base PostgreSQL de staging (por ejemplo, Neon) accesible desde Vercel. Ejecuta `npm run build` y `npm run migrate` dentro de `backend` con las variables de staging antes de probar el sitio.
 4. Configura variables **separadas para Preview y Production** en Vercel:
-   - Backend: `NODE_ENV=production`, `DATABASE_URL` (secreto TLS del proveedor), `JWT_SECRET` (genera uno nuevo con `openssl rand -base64 48`), `CORS_ORIGIN` (origen HTTPS exacto del frontend, sin `*`) y `DB_POOL_MAX=2`.
+   - Backend: `NODE_ENV=production`, `DATABASE_URL` (con TLS), `JWT_SECRET` (nuevo secreto aleatorio de al menos 32 bytes), `JWT_ISSUER`, `JWT_AUDIENCE`, `CORS_ORIGIN` (origen HTTPS exacto del frontend, sin `*`) y `DB_POOL_MAX=2`.
    - Frontend: `VITE_API_URL=https://<dominio-backend>/api` y `VITE_FINANCE_MODE=local` para mantener los datos financieros de demostración en el navegador. Usa el dominio real que Vercel asigne a Preview/Production.
 5. Vuelve a desplegar después de guardar variables y comprueba `/health`, el inicio de sesión, `/api/estado` como supervisor y la vista Auditoría.
 
@@ -223,10 +232,14 @@ Todas estas rutas requieren `Authorization: Bearer <accessToken>`.
 |--------|------|---------|
 | GET / POST | `/api/grupos` | Listar los grupos propios / crear un grupo (el creador queda como administrador). |
 | GET | `/api/grupos/:grupoId/integrantes` | Consultar integrantes activos del grupo. |
-| POST | `/api/grupos/:grupoId/integrantes` | Agregar un integrante (JSON `{ "usuarioId": 2 }`). Solo administradores gestionan integrantes. |
+| POST | `/api/grupos/:grupoId/integrantes` | Agregar un integrante por ID (`{ "usuarioId": 2 }`) o correo (`{ "email": "ana@example.com" }`). Solo administradores gestionan integrantes. |
 | DELETE | `/api/grupos/:grupoId/integrantes/:usuarioId` | Retirar un integrante; el grupo conserva un administrador activo. |
 | GET / POST | `/api/grupos/:grupoId/gastos` | Consultar o registrar gastos con división equitativa o personalizada. |
-| POST | `/api/grupos/gastos/:gastoId/pagos` | Confirmar el pago pendiente del usuario autenticado. |
+| DELETE | `/api/grupos/gastos/:gastoId` | Eliminar un gasto propio sin pagos confirmados ni liquidaciones asociadas; conserva un movimiento de auditoría. |
+| POST | `/api/grupos/gastos/:gastoId/pagos` | Reportar el pago de la participación del usuario autenticado; no cambia el balance hasta que el acreedor confirme. |
+| GET | `/api/grupos/:grupoId/liquidaciones` | Listar liquidaciones pendientes en las que participa el usuario autenticado. |
+| POST | `/api/grupos/:grupoId/liquidaciones` | Reportar una liquidación entre integrantes (`{ "acreedorId": 2, "monto": 15.50 }`). |
+| POST | `/api/grupos/:grupoId/liquidaciones/:liquidacionId/confirmar` | El acreedor confirma la recepción; entonces se actualizan los balances. |
 | GET | `/api/grupos/:grupoId/balances` | Consultar balances netos del integrante autenticado. |
 | GET | `/api/grupos/:grupoId/historial` | Consultar movimientos recientes del grupo. |
 | GET | `/api/reportes/resumen` | KPIs personales y proyección mensual mediante promedio móvil de los tres meses completos previos. |
@@ -250,6 +263,14 @@ El servicio reparte los importes en centavos para conservar exactamente el
 monto total. El alta del gasto, sus participaciones, movimientos, notificaciones
 y el recálculo de balances se ejecutan dentro de una transacción. Las migraciones
 `003_modulos_financieros.sql` crean las tablas e índices de estos módulos.
+
+Para registrar un grupo, enviar `integrantes` como una lista opcional de correos
+de cuentas activas. La creación del grupo y la incorporación de sus integrantes
+se guardan en una transacción. Los reportes de pago permanecen pendientes y no
+reducen una deuda hasta la confirmación del acreedor; se requiere aplicar
+`013_liquidaciones_confirmadas.sql` antes de usar este flujo. En el cliente,
+los errores del modo API se muestran como errores y no se reemplazan por datos
+locales; la demostración local se selecciona explícitamente.
 
 ### Verificación de comprobantes
 

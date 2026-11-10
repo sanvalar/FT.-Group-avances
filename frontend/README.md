@@ -29,6 +29,8 @@ La auditoría está disponible únicamente para supervisores. Registra solicitud
 
 En las cuentas normales, los módulos financieros usan el backend y PostgreSQL. La cuenta común de exposición usa datos de ejemplo guardados en el navegador; las operaciones que realices con ella no modifican PostgreSQL. Para crear un grupo en el modo backend, los integrantes deben tener una cuenta registrada y se agregan por su correo.
 
+Los pagos del modo backend siguen confirmación bilateral: el deudor reporta la transferencia y el acreedor la confirma desde el panel; el balance cambia solo después de confirmar. Los errores de red o del API se muestran y no se convierten en operaciones locales exitosas. En modo de demostración, las operaciones permanecen en el navegador.
+
 La cuenta `usuario@ftgroup.test` usa automáticamente datos financieros de demostración guardados solo en el navegador, incluso si `VITE_FINANCE_MODE=api`. Así puede recorrer con ejemplos el panel, grupos, gastos, historial, análisis y escaneo, sin modificar datos del backend. En «Mi perfil» se pueden restaurar los datos de ejemplo. Las demás cuentas siguen usando el modo configurado. Si quieres poner toda la app en modo demostración, usa `VITE_FINANCE_MODE=local`.
 
 ## Diseño adaptable
@@ -110,8 +112,12 @@ Los umbrales están en `METAS`, dentro de `kpis.js`.
 
 **Indicadores y estimadores** (`src/utils/analitica.js`):
 - **Indicadores:** gasto mensual promedio, ticket promedio y mediano, cumplimiento de pago, días para saldar, frecuencia, concentración de aportes (Herfindahl), % de gastos con OCR y distribución por categoría.
-- **Estimadores:** run rate, media móvil basada en los últimos 7 días (extrapolada al mes), regresión lineal (R²) y suavizado exponencial, combinados en un consenso.
-- **Predicciones:** proyección de 3 o 6 meses con índice estacional y detección de gastos atípicos (puntaje z).
+- **Comparación:** variación por categoría y grupo frente al mes anterior hasta el mismo día; una categoría sin periodo base se marca “Sin base”, no como porcentaje infinito.
+- **Estimadores:** run rate, media móvil basada en los últimos 7 días (extrapolada al mes), regresión lineal (R²) y suavizado exponencial. Los meses sin gastos se incluyen como cero y la estacionalidad solo se aplica con al menos dos observaciones para ese mes calendario.
+- **Validación temporal:** el pronóstico mensual se evalúa con ventanas históricas consecutivas (cada pronóstico se entrena solo con meses anteriores). Con menos de tres predicciones de prueba el nivel se muestra insuficiente; de lo contrario se informa error porcentual y un rango empírico P80.
+- **Gastos atípicos:** comparación por mediana y dispersión robusta contra gastos del mismo grupo/categoría, categoría, grupo o conjunto general. Se exige una base comparable suficiente; una alerta indica revisión, no fraude.
+
+Todos los cálculos se realizan en el navegador sobre los gastos que el usuario puede consultar. Los rangos son orientativos, no garantías ni decisiones automáticas.
 
 **Datos históricos de prueba (modo local).** Inicia sesión, abre la consola del navegador, pega `scripts/seed-historico.js` y recarga la página. Así se cargan 12 meses de gastos.
 

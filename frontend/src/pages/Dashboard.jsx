@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { financeApi } from '../services/financeApi'
+import { financeApi, usesLocalFinance } from '../services/financeApi'
 import { useData } from '../utils/useData'
 import { currentMonthLabel, firstName, money } from '../utils/format'
 import { Alert, Avatar, Empty, Loader, PageHeader } from '../components/ui'
@@ -9,22 +9,56 @@ import MapView from '../components/MapView'
 
 export default function Dashboard({ user }) {
   const me = String(user.id)
-  const { data, error, loading, reload } = useData(() => financeApi.summary(user), [user.id])
+  const { data, error, loading, reload } = useData(async () => {
+    const resumen = await financeApi.summary(user)
+    const pendientes = await Promise.all((resumen?.grupos || []).map(async grupo => {
+      const liquidaciones = await financeApi.pendingSettlements(user, grupo.id)
+      return liquidaciones.map(liquidacion => ({
+        ...liquidacion,
+        grupo_id: String(grupo.id),
+        grupo: grupo.nombre,
+        de: String(liquidacion.deudorId),
+        para: String(liquidacion.acreedorId),
+      }))
+    }))
+    return { ...resumen, liquidacionesPendientes: pendientes.flat() }
+  }, [user.id])
   const [busy, setBusy] = useState(null)
-  const [msg, setMsg] = useState('')
+  const [msg, setMsg] = useState({ type: 'success', text: '' })
+  const isLocal = usesLocalFinance(user)
 
   if (loading) return <Loader />
   if (error) return <Alert>{error}</Alert>
 
-  const { grupos, teDeben, debes, balance, liquidaciones } = data
+  const { grupos, teDeben, debes, balance, liquidaciones, liquidacionesPendientes } = data
   const nombre = u => (u?.id === me ? 'Tú' : firstName(u?.nombre))
 
   const settle = async p => {
-    setBusy(`${p.grupo_id}${p.de}${p.para}`); setMsg('')
+    const key = `${p.grupo_id}${p.de}${p.para}`
+    setBusy(key); setMsg({ text: '' })
     try {
-      await financeApi.settle(user, { grupo_id: p.grupo_id, de: p.de, para: p.para })
-      setMsg(`Pago de ${money(p.monto)} registrado en ${p.grupo}.`)
+      await financeApi.settle(user, { grupo_id: p.grupo_id, de: p.de, para: p.para, monto: p.monto })
+      setMsg({
+        type: 'success',
+        text: isLocal
+          ? `Liquidación de ${money(p.monto)} registrada en la demostración.`
+          : `Pago de ${money(p.monto)} reportado en ${p.grupo}; queda pendiente de confirmación.`,
+      })
       await reload()
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message })
+    } finally { setBusy(null) }
+  }
+
+  const confirmar = async (p, pendiente) => {
+    const key = `${p.grupo_id}${p.de}${p.para}`
+    setBusy(key); setMsg({ text: '' })
+    try {
+      await financeApi.confirmSettlement(user, p.grupo_id, pendiente.id)
+      setMsg({ type: 'success', text: `Recepción de ${money(pendiente.monto)} confirmada en ${p.grupo}.` })
+      await reload()
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message })
     } finally { setBusy(null) }
   }
 
@@ -51,7 +85,7 @@ export default function Dashboard({ user }) {
         </div>
       </div>
 
-      <Alert type="success">{msg}</Alert>
+      <Alert type={msg.type}>{msg.text}</Alert>
 
       <div className="dash-grid">
         <section className="section">
@@ -63,6 +97,8 @@ export default function Dashboard({ user }) {
               {liquidaciones.map(p => {
                 const mine = p.de === me || p.para === me
                 const key = `${p.grupo_id}${p.de}${p.para}`
+                const pendiente = liquidacionesPendientes.find(item =>
+                  item.grupo_id === String(p.grupo_id) && item.de === String(p.de) && item.para === String(p.para))
                 return (
                   <li key={key} className="list-row">
                     <Avatar user={p.deUsuario} size={34} />
@@ -72,10 +108,19 @@ export default function Dashboard({ user }) {
                     </div>
                     <div className="list-end">
                       <strong className={`amount ${p.para === me ? 'pos' : p.de === me ? 'neg' : 'muted'}`}>{money(p.monto)}</strong>
-                      {mine && (
-                        <button className="btn btn-ghost btn-xs" disabled={busy === key} onClick={() => settle(p)}>
-                          {busy === key ? '…' : p.de === me ? 'Pagué' : 'Recibí'}
-                        </button>
+                      {mine && p.de === me && (
+                        pendiente
+                          ? <small className="muted">Esperando confirmación</small>
+                          : <button className="btn btn-ghost btn-xs" disabled={busy === key} onClick={() => settle(p)}>
+                              {busy === key ? '…' : 'Reportar pago'}
+                            </button>
+                      )}
+                      {mine && p.para === me && (
+                        pendiente
+                          ? <button className="btn btn-ghost btn-xs" disabled={busy === key} onClick={() => confirmar(p, pendiente)}>
+                              {busy === key ? '…' : 'Confirmar recibido'}
+                            </button>
+                          : <small className="muted">Pendiente de pago</small>
                       )}
                     </div>
                   </li>

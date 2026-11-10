@@ -14,6 +14,7 @@ export interface RegistrarGastoComando {
   categoria: string;
   pagadorId?: number;
   tipoDivision: 'equitativa' | 'personalizada';
+  origenRegistro?: 'manual' | 'ocr';
   usuarioIds?: number[];
   participaciones?: ParticipacionCalculada[];
   comprobante?: ComprobanteFactura;
@@ -22,8 +23,13 @@ export interface RegistrarGastoComando {
 export class GrupoGastoService {
   constructor(private readonly repository: GrupoGastoRepository) {}
 
-  crearGrupo(usuarioId: number, nombre: string, descripcion?: string) {
-    return this.repository.crearGrupo(usuarioId, nombre.trim(), descripcion?.trim());
+  crearGrupo(usuarioId: number, nombre: string, descripcion?: string, integrantes?: string[]) {
+    return this.repository.crearGrupo(
+      usuarioId,
+      nombre.trim(),
+      descripcion?.trim(),
+      integrantes?.map((email) => email.trim().toLowerCase()),
+    );
   }
 
   listarGrupos(usuarioId: number) {
@@ -42,7 +48,7 @@ export class GrupoGastoService {
     return this.repository.listarIntegrantes(usuarioId, grupoId);
   }
 
-  agregarMiembro(actorId: number, grupoId: number, usuarioId: number) {
+  agregarMiembro(actorId: number, grupoId: number, usuarioId: number | string) {
     return this.repository.agregarMiembro(actorId, grupoId, usuarioId);
   }
 
@@ -71,6 +77,7 @@ export class GrupoGastoService {
       categoria: comando.categoria.trim(),
       pagadorId: comando.pagadorId,
       tipoDivision: comando.tipoDivision,
+      origenRegistro: comando.origenRegistro,
       participaciones,
       comprobante: comando.comprobante,
     };
@@ -81,8 +88,24 @@ export class GrupoGastoService {
     return this.repository.listarGastos(usuarioId, grupoId);
   }
 
+  eliminarGasto(actorId: number, gastoId: number) {
+    return this.repository.eliminarGasto(actorId, gastoId);
+  }
+
   registrarPago(usuarioId: number, gastoId: number) {
     return this.repository.registrarPago(usuarioId, gastoId);
+  }
+
+  listarLiquidacionesPendientes(usuarioId: number, grupoId: number) {
+    return this.repository.listarLiquidacionesPendientes(usuarioId, grupoId);
+  }
+
+  reportarLiquidacion(deudorId: number, grupoId: number, acreedorId: number, monto: number, gastoId?: number) {
+    return this.repository.reportarLiquidacion(deudorId, grupoId, acreedorId, monto, gastoId);
+  }
+
+  confirmarLiquidacion(acreedorId: number, grupoId: number, liquidacionId: number) {
+    return this.repository.confirmarLiquidacion(acreedorId, grupoId, liquidacionId);
   }
 
   listarBalances(usuarioId: number, grupoId: number) {

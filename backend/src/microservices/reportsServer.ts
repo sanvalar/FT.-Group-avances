@@ -2,7 +2,7 @@ import { crearReportsApp } from './reportsApp';
 import { env } from '../infrastructure/config/env';
 import { verificarConexionBD } from '../infrastructure/adapters/out/persistence/postgres/db';
 
-const PORT = process.env.PORT || 3003;
+const PORT = Number(process.env.PORT ?? 3003);
 
 async function bootstrap() {
   try {
@@ -14,8 +14,8 @@ async function bootstrap() {
   }
 
   const app = crearReportsApp();
-  app.listen(PORT, () => {
-    console.log(`[REPORTS-SERVICE] Escuchando en http://localhost:${PORT}`);
+  app.listen(PORT, env.serviceHost, () => {
+    console.log(`[REPORTS-SERVICE] Escuchando en http://${env.serviceHost}:${PORT}`);
   });
 }
 

@@ -17,7 +17,7 @@ function NewGroupModal({ user, onClose, onCreated }) {
 
   const submit = async e => {
     e.preventDefault(); setError('')
-    const validos = [...new Set(integrantes.map(x => x.trim().toLowerCase()).filter(Boolean))].map(email => ({ email }))
+    const validos = [...new Set(integrantes.map(x => x.trim().toLowerCase()).filter(Boolean))]
     if (!validos.length) return setError('Agrega el correo de al menos un integrante además de ti.')
     setSaving(true)
     try {

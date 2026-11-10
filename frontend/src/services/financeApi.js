@@ -311,16 +311,87 @@ const remote = {
   // Las respuestas del backend usan los mismos nombres de campos que el modo local.
   summary: () => graphqlApi.obtenerMiPanel(),
   groups: () => graphqlApi.obtenerMisGrupos(),
-  createGroup: (_u, body) => request('/grupos', { method: 'POST', auth: true, body }),
-  addMember: (_u, id, email) => request(`/grupos/${id}/miembros`, { method: 'POST', auth: true, body: { email } }),
-  async history() {
-    const response = await request('/historial?limite=50', { auth: true })
-    return arrayFromResponse(response, ['historial', 'movimientos'], '/historial')
+  createGroup: (_u, body) => request('/grupos', {
+    method: 'POST',
+    auth: true,
+    body: {
+      nombre: body.nombre,
+      descripcion: body.descripcion,
+      integrantes: (body.integrantes || []).map(integrante => typeof integrante === 'string' ? integrante : integrante.email),
+    },
+  }),
+  addMember: (_u, id, email) => request(`/grupos/${id}/integrantes`, { method: 'POST', auth: true, body: { email } }),
+  async history(user) {
+    const grupos = await graphqlApi.obtenerMisGrupos()
+    const gruposHistorial = await Promise.all(grupos.map(async grupo => {
+      const response = await request(`/grupos/${grupo.id}/historial`, { auth: true })
+      const movimientos = arrayFromResponse(response, ['movimientos'], `/grupos/${grupo.id}/historial`)
+      return movimientos.map(movimiento => ({
+        ...movimiento,
+        grupo_id: String(grupo.id),
+        tipo_movimiento: movimiento.tipoMovimiento,
+        usuario_id: String(movimiento.usuarioId),
+        gasto_id: movimiento.gastoId ? String(movimiento.gastoId) : null,
+        usuario: { id: String(movimiento.usuarioId), nombre: movimiento.usuario },
+        grupo: { id: String(grupo.id), nombre: grupo.nombre },
+      }))
+    }))
+    return gruposHistorial.flat()
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+      .slice(0, 50)
   },
-  archiveGroup: (_u, id) => request(`/grupos/${id}`, { method: 'DELETE', auth: true }),
-  async expenses() {
-    const response = await request('/gastos', { auth: true })
-    return arrayFromResponse(response, ['gastos'], '/gastos')
+  archiveGroup: (_u, id) => graphqlApi.archivarGrupo(id),
+  async expenses(user) {
+    const grupos = await graphqlApi.obtenerMisGrupos()
+    const gruposGastos = await Promise.all(grupos.map(async grupo => {
+      const [response, responseLiquidaciones] = await Promise.all([
+        request(`/grupos/${grupo.id}/gastos`, { auth: true }),
+        request(`/grupos/${grupo.id}/liquidaciones`, { auth: true }),
+      ])
+      const gastos = arrayFromResponse(response, ['gastos'], `/grupos/${grupo.id}/gastos`)
+      const liquidaciones = arrayFromResponse(responseLiquidaciones, ['liquidaciones'], `/grupos/${grupo.id}/liquidaciones`)
+      return gastos.map(gasto => {
+        const participaciones = gasto.participaciones || []
+        const divisiones = participaciones.map(parte => ({
+          usuario_id: String(parte.usuarioId),
+          monto_asignado: Number(parte.montoAsignado),
+          estado_pago: parte.estadoPago,
+          fecha_pago: parte.fechaPago,
+          pago_reportado: liquidaciones.some(liquidacion =>
+            String(liquidacion.gastoId) === String(gasto.id)
+            && String(liquidacion.deudorId) === String(parte.usuarioId)
+            && String(liquidacion.acreedorId) === String(gasto.pagador_id)),
+          usuario: {
+            id: String(parte.usuarioId),
+            nombre: parte.nombre,
+          },
+        }))
+        const me = String(user.id)
+        const miParte = divisiones.find(parte => parte.usuario_id === me)
+        return {
+          ...gasto,
+          id: String(gasto.id),
+          grupo_id: String(gasto.grupo_id),
+          pagador_id: String(gasto.pagador_id),
+          monto_total: Number(gasto.monto_total),
+          fecha_gasto: String(gasto.fecha_gasto).slice(0, 10),
+          grupo: { id: String(grupo.id), nombre: grupo.nombre },
+          pagador: { id: String(gasto.pagador_id), nombre: gasto.pagador },
+          personas: divisiones.length,
+          divisiones,
+          mi_parte: Number(miParte?.monto_asignado || 0),
+          mi_estado: !miParte ? 'no_participa' : String(gasto.pagador_id) === me ? 'pagador' : miParte.estado_pago,
+          me_deben: String(gasto.pagador_id) === me
+            ? divisiones
+              .filter(parte => parte.usuario_id !== me && parte.estado_pago === 'pendiente')
+              .reduce((total, parte) => total + parte.monto_asignado, 0)
+            : 0,
+          comprobante_verificacion: gasto.comprobante_verificacion,
+        }
+      })
+    }))
+    return gruposGastos.flat()
+      .sort((a, b) => b.fecha_gasto.localeCompare(a.fecha_gasto) || String(b.fecha_registro).localeCompare(String(a.fecha_registro)))
   },
   createExpense: (_u, body) => {
     const comprobante = body.recibo?.docHash ? {
@@ -341,6 +412,7 @@ const remote = {
       fechaGasto: body.fecha_gasto,
       categoria: body.categoria,
       pagadorId: Number(body.pagador_id),
+      origenRegistro: body.origen_registro === 'ocr' ? 'ocr' : 'manual',
       ...(comprobante ? { comprobante } : {}),
     }
     const division = body.tipo_division === 'personalizada'
@@ -356,10 +428,21 @@ const remote = {
         }
     return request(`/grupos/${body.grupo_id}/gastos`, { method: 'POST', auth: true, body: division })
   },
-  deleteExpense: (_u, id) => request(`/gastos/${id}`, { method: 'DELETE', auth: true }),
-  payShare: (u, gastoId, usuarioId = String(u.id)) =>
-    request(`/gastos/${gastoId}/pagar`, { method: 'POST', auth: true, body: { usuario_id: usuarioId } }),
-  settle: (_u, body) => request('/balances/liquidar', { method: 'POST', auth: true, body }),
+  deleteExpense: (_u, id) => request(`/grupos/gastos/${id}`, { method: 'DELETE', auth: true }),
+  payShare: (_u, gastoId) =>
+    request(`/grupos/gastos/${gastoId}/pagos`, { method: 'POST', auth: true }),
+  async pendingSettlements(_u, grupoId) {
+    const response = await request(`/grupos/${grupoId}/liquidaciones`, { auth: true })
+    return arrayFromResponse(response, ['liquidaciones'], `/grupos/${grupoId}/liquidaciones`)
+  },
+  settle: (_u, { grupo_id, para, monto }) =>
+    request(`/grupos/${grupo_id}/liquidaciones`, {
+      method: 'POST',
+      auth: true,
+      body: { acreedorId: Number(para), monto: Number(monto) },
+    }),
+  confirmSettlement: (_u, grupoId, liquidacionId) =>
+    request(`/grupos/${grupoId}/liquidaciones/${liquidacionId}/confirmar`, { method: 'POST', auth: true }),
   resetDemo: async () => {},
 }
 
@@ -397,34 +480,34 @@ const localConAuditoria = new Proxy(local, {
   },
 })
 
-function withFallback(remoteFn, localFn) {
+function inFinanceMode(remoteFn, localFn) {
   return async function (user, ...args) {
-    if (shouldUseLocalFinance(user, MODE)) {
-      return localFn(user, ...args)
-    }
-    try {
-      return await remoteFn(user, ...args)
-    } catch (err) {
-      if (err.status === 0 || err.status === 404 || err.status === 502 || err.status === 503) {
-        return localFn(user, ...args)
-      }
-      throw err
-    }
+    return shouldUseLocalFinance(user, MODE)
+      ? localFn(user, ...args)
+      : remoteFn(user, ...args)
   }
 }
 
 export const financeApi = {
-  summary: withFallback(remote.summary, localConAuditoria.summary),
-  groups: withFallback(remote.groups, localConAuditoria.groups),
-  createGroup: withFallback(remote.createGroup, localConAuditoria.createGroup),
-  addMember: withFallback(remote.addMember, localConAuditoria.addMember),
-  history: withFallback(remote.history, localConAuditoria.history),
-  archiveGroup: withFallback(remote.archiveGroup, localConAuditoria.archiveGroup),
-  expenses: withFallback(remote.expenses, localConAuditoria.expenses),
-  createExpense: withFallback(remote.createExpense, localConAuditoria.createExpense),
-  deleteExpense: withFallback(remote.deleteExpense, localConAuditoria.deleteExpense),
-  payShare: withFallback(remote.payShare, localConAuditoria.payShare),
-  settle: withFallback(remote.settle, localConAuditoria.settle),
+  summary: inFinanceMode(remote.summary, localConAuditoria.summary),
+  groups: inFinanceMode(remote.groups, localConAuditoria.groups),
+  createGroup: inFinanceMode(remote.createGroup, localConAuditoria.createGroup),
+  addMember: inFinanceMode(remote.addMember, localConAuditoria.addMember),
+  history: inFinanceMode(remote.history, localConAuditoria.history),
+  archiveGroup: inFinanceMode(remote.archiveGroup, localConAuditoria.archiveGroup),
+  expenses: inFinanceMode(remote.expenses, localConAuditoria.expenses),
+  createExpense: inFinanceMode(remote.createExpense, localConAuditoria.createExpense),
+  deleteExpense: inFinanceMode(remote.deleteExpense, localConAuditoria.deleteExpense),
+  payShare: inFinanceMode(remote.payShare, localConAuditoria.payShare),
+  pendingSettlements: inFinanceMode(
+    remote.pendingSettlements,
+    async () => [],
+  ),
+  settle: inFinanceMode(remote.settle, localConAuditoria.settle),
+  confirmSettlement: inFinanceMode(
+    remote.confirmSettlement,
+    async () => {},
+  ),
   resetDemo: localConAuditoria.resetDemo,
 }
 

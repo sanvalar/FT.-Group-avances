@@ -2,7 +2,7 @@ import { crearAuthApp } from './authApp';
 import { env } from '../infrastructure/config/env';
 import { verificarConexionBD } from '../infrastructure/adapters/out/persistence/postgres/db';
 
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT ?? 3001);
 
 async function bootstrap() {
   try {
@@ -14,8 +14,8 @@ async function bootstrap() {
   }
 
   const app = crearAuthApp();
-  app.listen(PORT, () => {
-    console.log(`[AUTH-SERVICE] Escuchando en http://localhost:${PORT}`);
+  app.listen(PORT, env.serviceHost, () => {
+    console.log(`[AUTH-SERVICE] Escuchando en http://${env.serviceHost}:${PORT}`);
   });
 }
 

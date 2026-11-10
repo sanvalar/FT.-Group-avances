@@ -18,6 +18,7 @@ function requerido(nombre: string, valorPorDefecto?: string): string {
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '4000', 10),
+  serviceHost: process.env.SERVICE_HOST ?? '127.0.0.1',
   databasePoolMax: Number.parseInt(
     process.env.DB_POOL_MAX ?? (process.env.NODE_ENV === 'production' ? '2' : '10'),
     10,
@@ -38,6 +39,8 @@ export const env = {
 
   jwtSecret: requerido('JWT_SECRET'),
   jwtExpiracion: process.env.JWT_EXPIRATION ?? '15m',
+  jwtIssuer: process.env.JWT_ISSUER ?? 'ft-group',
+  jwtAudience: process.env.JWT_AUDIENCE ?? 'ft-group-api',
 
   corsOrigins: (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
     .split(',')
@@ -57,8 +60,19 @@ export const env = {
   iaTimeoutMs: Number.parseInt(process.env.IA_TIMEOUT_MS ?? '25000', 10),
 };
 
-if (env.jwtSecret.length < 32) {
-  throw new Error('JWT_SECRET debe tener al menos 32 caracteres.');
+if (Buffer.byteLength(env.jwtSecret, 'utf8') < 32) {
+  throw new Error('JWT_SECRET debe tener al menos 32 bytes.');
+}
+if (!env.jwtIssuer.trim() || !env.jwtAudience.trim()) {
+  throw new Error('JWT_ISSUER y JWT_AUDIENCE no pueden estar vacíos.');
+}
+if (env.nodeEnv === 'production') {
+  if (!process.env.JWT_ISSUER?.trim() || !process.env.JWT_AUDIENCE?.trim()) {
+    throw new Error('JWT_ISSUER y JWT_AUDIENCE deben configurarse explícitamente en producción.');
+  }
+  if (/reemplazar|change.?me|example|ft_group_super_secret/i.test(env.jwtSecret)) {
+    throw new Error('JWT_SECRET parece ser un valor de ejemplo; configura un secreto aleatorio en producción.');
+  }
 }
 if (env.nodeEnv === 'production' && env.corsOrigins.some((origen) => origen === '*')) {
   throw new Error('CORS_ORIGIN debe definir orígenes explícitos en producción.');
@@ -71,9 +85,6 @@ if (env.nodeEnv === 'production' && env.corsOrigins.length === 0) {
 }
 if (env.nodeEnv === 'production' && env.corsOrigins.some((origen) => !origen.startsWith('https://'))) {
   throw new Error('CORS_ORIGIN debe usar HTTPS en producción.');
-}
-if (env.nodeEnv === 'production' && env.jwtSecret === 'solo-desarrollo-local-cambiar-antes-de-desplegar-1234567890') {
-  throw new Error('Configura un JWT_SECRET único antes de desplegar.');
 }
 if (!Number.isSafeInteger(env.databasePoolMax) || env.databasePoolMax < 1) {
   throw new Error('DB_POOL_MAX debe ser un entero positivo.');

@@ -55,6 +55,43 @@ function Distribucion({ datos, total }) {
   )
 }
 
+function ComparacionSegmentos({ datos, titulo, nombreColumna, label }) {
+  const filas = datos.slice(0, 6)
+  return (
+    <section className="section">
+      <h2 className="section-title">{titulo}</h2>
+      <div className="card">
+        {!filas.length ? <p className="muted">Sin gastos en los periodos comparados.</p> : (
+          <table className="table table-keep">
+            <thead>
+              <tr><th>{nombreColumna}</th><th>Este mes</th><th>Mes anterior</th><th>Variación</th></tr>
+            </thead>
+            <tbody>
+              {filas.map(fila => (
+                <tr key={fila.clave}>
+                  <td><strong>{label(fila.clave)}</strong></td>
+                  <td className="amount">{money(fila.actual)}</td>
+                  <td className="amount">{money(fila.anterior)}</td>
+                  <td>
+                    {fila.variacion === null ? <span className="muted">Sin base</span> : (
+                      <span className={fila.variacion > 0 ? 'neg' : fila.variacion < 0 ? 'pos' : 'muted'}>
+                        {fila.variacion > 0 ? '+' : ''}{fila.variacion.toFixed(1)} %
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="hint">
+          Comparación hasta el mismo día del mes anterior; un aumento desde cero se muestra como “Sin base”.
+        </p>
+      </div>
+    </section>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* KPIs básicos                                                        */
 /* ------------------------------------------------------------------ */
@@ -274,6 +311,13 @@ export default function Analisis({ user }) {
               sostenida, sino un patrón estacional. Por eso la regresión se excluye del consenso.
             </p>
           )}
+          <div className="hint">
+            Desempeño histórico del pronóstico: {est.evaluacion.nivel === 'insuficiente'
+              ? `historial insuficiente (${est.evaluacion.mesesEvaluados} meses de prueba; se necesitan al menos 3).`
+              : `${est.evaluacion.nivel} · error porcentual medio ${est.evaluacion.errorPorcentualMedio.toFixed(1)} % en ${est.evaluacion.mesesEvaluados} meses no usados para entrenar cada predicción.`}
+            {est.evaluacion.errorAbsolutoMedio !== null
+              && ` Error absoluto medio: ${money(est.evaluacion.errorAbsolutoMedio)}.`}
+          </div>
         </div>
       </section>
 
@@ -283,9 +327,30 @@ export default function Analisis({ user }) {
         <div className="card">
           <Barras serie={ind.serie} proyeccion={est.proyeccion} />
           <p className="hint">
-            Las barras claras son meses proyectados, ajustados por el índice estacional
-            de cada mes calendario.
+            Las barras claras usan el pronóstico mensual y el índice estacional. El rango solo aparece cuando hay
+            al menos tres predicciones históricas de prueba.
           </p>
+          <p className="hint">
+            La estimación superior y su consenso describen el mes en curso; las barras futuras usan los últimos
+            tres meses, suavizado exponencial y tendencia cuando el ajuste alcanza el mínimo definido.
+          </p>
+          {est.proyeccion.some(fila => fila.minimo !== null) && (
+            <div className="table-wrap" style={{ overflowX: 'auto' }}>
+              <table className="table table-keep">
+                <thead><tr><th>Mes</th><th>Estimación</th><th>Rango orientativo (P80)</th></tr></thead>
+                <tbody>
+                  {est.proyeccion.map(fila => (
+                    <tr key={fila.periodo}>
+                      <td>{monthLabel(`${fila.periodo}-01`)}</td>
+                      <td className="amount">{money(fila.total)}</td>
+                      <td className="amount">{fila.minimo === null ? 'Historial insuficiente' : `${money(fila.minimo)} – ${money(fila.maximo)}`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="hint">El P80 es un intervalo empírico de errores pasados, no una garantía ni un intervalo estadístico formal.</p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -295,6 +360,20 @@ export default function Analisis({ user }) {
           <h2 className="section-title">Distribución por categoría</h2>
           <Distribucion datos={ind.por_categoria} total={ind.gasto_total} />
         </section>
+
+        <ComparacionSegmentos
+          datos={ind.comparacion_periodos.categorias}
+          titulo="Variación por categoría"
+          nombreColumna="Categoría"
+          label={id => categoria(id).label}
+        />
+
+        <ComparacionSegmentos
+          datos={ind.comparacion_periodos.grupos}
+          titulo="Variación por grupo"
+          nombreColumna="Grupo"
+          label={nombre => nombre}
+        />
 
         <section className="section">
           <h2 className="section-title">Otros indicadores</h2>
@@ -338,12 +417,12 @@ export default function Analisis({ user }) {
         <h2 className="section-title">Gastos atípicos detectados</h2>
         {est.atipicos.length === 0 ? (
           <Empty icon="check" title="Sin valores atípicos"
-            text="Ningún gasto se aleja más de dos desviaciones del promedio." />
+            text="No hay gastos que se alejen de forma inusual respecto a cuatro o más gastos comparables." />
         ) : (
           <div className="card">
             <table className="table table-keep">
               <thead>
-                <tr><th>Gasto</th><th className="hide-sm">Fecha</th><th>Monto</th><th>Desviación</th></tr>
+                <tr><th>Gasto</th><th className="hide-sm">Fecha</th><th>Monto</th><th>Referencia robusta</th></tr>
               </thead>
               <tbody>
                 {est.atipicos.map(a => (
@@ -354,14 +433,17 @@ export default function Analisis({ user }) {
                     </td>
                     <td className="hide-sm">{shortDate(a.fecha_gasto)}</td>
                     <td className="amount">{money(a.monto_total)}</td>
-                    <td><span className="pill">{a.z > 0 ? '+' : ''}{a.z.toFixed(1)} σ</span></td>
+                    <td>
+                      <span className="pill">{a.z > 0 ? '+' : ''}{a.z.toFixed(1)} escala</span>
+                      <small className="muted">{a.referencia} · mediana {money(a.mediana_comparable)} · n={a.cantidad_referencias}</small>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="hint">
-              Se marcan los gastos que superan dos desviaciones estándar del monto promedio.
-              Sirven para revisar cobros inusuales o errores de digitación.
+              Se comparan con gastos del mismo grupo/categoría cuando hay suficientes datos. La mediana y la
+              dispersión robusta reducen el efecto de valores extremos; la alerta es una señal de revisión, no fraude.
             </p>
           </div>
         )}

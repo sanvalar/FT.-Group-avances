@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { financeApi } from '../services/financeApi'
+import { financeApi, usesLocalFinance } from '../services/financeApi'
 import { useData } from '../utils/useData'
 import { categoria, firstName, money, shortDate } from '../utils/format'
 import { Alert, Avatar, Chips, Empty, Loader, Modal, PageHeader } from '../components/ui'
@@ -21,18 +21,38 @@ function MyShare({ g }) {
 
 function ExpenseDetail({ gasto, user, onClose, onChanged }) {
   const me = String(user.id)
+  const isLocal = usesLocalFinance(user)
   const [busy, setBusy] = useState(null)
-  const canMark = d => d.estado_pago === 'pendiente' && d.usuario_id !== gasto.pagador_id && (d.usuario_id === me || gasto.pagador_id === me)
+  const [actionMessage, setActionMessage] = useState({ type: 'error', text: '' })
+  const canMark = d => d.estado_pago === 'pendiente' && !d.pago_reportado
+    && d.usuario_id === me && d.usuario_id !== gasto.pagador_id
 
   const pay = async d => {
-    setBusy(d.usuario_id)
-    await financeApi.payShare(user, gasto.id, d.usuario_id)
-    setBusy(null); onChanged()
+    setBusy(d.usuario_id); setActionMessage({ type: 'error', text: '' })
+    try {
+      await financeApi.payShare(user, gasto.id)
+      setActionMessage(isLocal
+        ? { type: 'success', text: 'Pago registrado en los datos de demostración.' }
+        : {
+            type: 'warning',
+            text: 'Pago reportado. El balance se actualizará cuando el acreedor confirme la recepción desde el panel.',
+          })
+      onChanged()
+    } catch (err) {
+      setActionMessage({ type: 'error', text: err.message })
+    } finally {
+      setBusy(null)
+    }
   }
   const remove = async () => {
     if (!window.confirm('¿Eliminar este gasto? Se recalcularán los balances del grupo.')) return
-    await financeApi.deleteExpense(user, gasto.id)
-    onChanged(true)
+    setActionMessage({ type: 'error', text: '' })
+    try {
+      await financeApi.deleteExpense(user, gasto.id)
+      onChanged(true)
+    } catch (err) {
+      setActionMessage({ type: 'error', text: err.message })
+    }
   }
   const cat = categoria(gasto.categoria)
 
@@ -42,6 +62,7 @@ function ExpenseDetail({ gasto, user, onClose, onChanged }) {
         {gasto.pagador_id === me && <button className="btn btn-danger-ghost" onClick={remove}><Icon name="trash" size={16} />Eliminar</button>}
         <button className="btn btn-primary" onClick={onClose}>Listo</button>
       </>}>
+      <Alert type={actionMessage.type}>{actionMessage.text}</Alert>
       <div className="detail-head">
         <span className="tile-icon"><Icon name={cat.icon} size={20} /></span>
         <div>
@@ -57,14 +78,17 @@ function ExpenseDetail({ gasto, user, onClose, onChanged }) {
             <div className="list-main">
               <span className="list-title">{d.usuario_id === me ? 'Tú' : d.usuario?.nombre}</span>
               <small className={d.estado_pago === 'pagado' ? 'pos' : 'neg'}>
-                {d.usuario_id === gasto.pagador_id ? 'Pagó el gasto' : d.estado_pago === 'pagado' ? 'Saldado' : 'Pendiente'}
+                {d.usuario_id === gasto.pagador_id ? 'Pagó el gasto'
+                  : d.estado_pago === 'pagado' ? 'Saldado'
+                    : d.pago_reportado ? 'Pago reportado'
+                      : 'Pendiente'}
               </small>
             </div>
             <div className="list-end">
               <strong>{money(d.monto_asignado)}</strong>
               {canMark(d) && (
                 <button className="btn btn-ghost btn-xs" disabled={busy === d.usuario_id} onClick={() => pay(d)}>
-                  {d.usuario_id === me ? 'Pagué' : 'Recibido'}
+                  Reportar pago
                 </button>
               )}
             </div>

@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { calcularKpis, periodos, variacion } from '../src/utils/kpis.js'
-import { analizar } from '../src/utils/analitica.js'
+import { analizar, atipicos, estimadores, serieMensual } from '../src/utils/analitica.js'
 
 const HOY = new Date(2026, 9, 13) // 13 de octubre de 2026
 const ME = 'u-yo'
@@ -105,4 +105,55 @@ test('media móvil: usa los gastos de los últimos siete días y los extrapola a
   const metodo = r.estimadores.metodos.find(m => m.id === 'media_movil')
   assert.equal(metodo.valor, (90000 / 7) * 31)
   assert.equal(metodo.nota, 'Gasto de los últimos 7 días, extrapolado al mes')
+})
+
+test('serie mensual incluye meses sin gastos para no sesgar los promedios', () => {
+  const serie = serieMensual([
+    gasto('ene', '2026-01-15', 100, ME, []),
+    gasto('mar', '2026-03-15', 300, ME, []),
+  ])
+  assert.deepEqual(serie, [
+    { periodo: '2026-01', total: 100, num_gastos: 1 },
+    { periodo: '2026-02', total: 0, num_gastos: 0 },
+    { periodo: '2026-03', total: 300, num_gastos: 1 },
+  ])
+})
+
+test('compara categorías y grupos con el mismo corte del mes anterior', () => {
+  const r = analizar(gastos, ME, { hoy: HOY })
+  const categoria = r.indicadores.comparacion_periodos.categorias.find(fila => fila.clave === 'otro')
+  assert.equal(categoria.actual, 390000)
+  assert.equal(categoria.anterior, 240000)
+  assert.equal(categoria.variacion, 62.5)
+  assert.equal(r.indicadores.comparacion_periodos.actual.hasta, '2026-10-13')
+  assert.equal(r.indicadores.comparacion_periodos.anterior.hasta, '2026-09-13')
+})
+
+test('detecta atípicos frente a gastos comparables con estadística robusta', () => {
+  const comparables = [90, 95, 100, 105, 110].map((monto, i) =>
+    ({ ...gasto(`base-${i}`, `2026-10-0${i + 1}`, monto, ME, []), grupo_id: 'casa', categoria: 'alimentacion' }))
+  const inusual = { ...gasto('inusual', '2026-10-10', 500, ME, []), grupo_id: 'casa', categoria: 'alimentacion' }
+  const ajeno = { ...gasto('ajeno', '2026-10-11', 10000, ME, []), grupo_id: 'viaje', categoria: 'transporte' }
+  const hallazgos = atipicos([...comparables, inusual, ajeno])
+  assert.ok(hallazgos.some(fila => fila.id === 'inusual' && fila.referencia === 'mismo grupo y categoría'))
+  assert.ok(hallazgos.every(fila => fila.cantidad_referencias >= 4))
+
+  const valoresIguales = [...Array(4)].map((_, i) =>
+    ({ ...gasto(`igual-${i}`, `2026-10-0${i + 1}`, 100, ME, []), grupo_id: 'casa', categoria: 'servicios' }))
+  const distinto = { ...gasto('distinto', '2026-10-10', 500, ME, []), grupo_id: 'casa', categoria: 'servicios' }
+  assert.ok(atipicos([...valoresIguales, distinto]).some(fila => fila.id === 'distinto'))
+})
+
+test('valida proyecciones con prueba temporal y solo muestra rango con suficiente historial', () => {
+  const serie = [100, 120, 110, 130, 125, 140].map((monto, i) =>
+    gasto(`mes-${i}`, `2026-0${i + 1}-15`, monto, ME, []))
+  const r = analizar(serie, ME, { horizonte: 2, hoy: new Date(2026, 8, 10) })
+  assert.equal(r.estimadores.evaluacion.mesesEvaluados, 3)
+  assert.notEqual(r.estimadores.evaluacion.margen80, null)
+  assert.ok(r.estimadores.proyeccion[0].minimo <= r.estimadores.proyeccion[0].total)
+  assert.ok(r.estimadores.proyeccion[0].maximo >= r.estimadores.proyeccion[0].total)
+
+  const pocos = analizar(serie.slice(0, 4), ME, { horizonte: 1, hoy: new Date(2026, 8, 10) })
+  assert.equal(pocos.estimadores.evaluacion.nivel, 'insuficiente')
+  assert.equal(pocos.estimadores.proyeccion[0].minimo, null)
 })

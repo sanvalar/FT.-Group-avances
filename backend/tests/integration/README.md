@@ -56,6 +56,6 @@ falso con `configurarExtractorFacturas`.
 | Archivo | Qué cubre |
 |---|---|
 | `auth.integration.ts` | Registro, login, Argon2id, rotación y revocación de refresh tokens, perfil, desactivación, auditoría |
-| `grupos.integration.ts` | Grupos, integrantes, gastos (equitativos/personalizados), balances, pagos, historial, control de acceso (IDOR) |
+| `grupos.integration.ts` | Grupos, integrantes por correo/ID, gastos (equitativos/personalizados), balances, pagos reportados y confirmados, eliminación auditada, historial, control de acceso (IDOR) |
 | `seguridad.integration.ts` | Cabeceras, CORS, tamaño de cuerpo, JSON inválido, inyección SQL, fuerza bruta, tokens alterados/expirados/`alg:none`, matriz de roles |
 | `ia.integration.ts` | Escaneo con IA: autenticación, formatos, firma del archivo, tamaño, errores del proveedor, límite por usuario |

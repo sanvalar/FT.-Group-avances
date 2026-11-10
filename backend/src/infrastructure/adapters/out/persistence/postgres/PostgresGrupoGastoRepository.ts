@@ -8,13 +8,23 @@ import {
   UsuarioNoEncontradoError,
   ValidacionError,
 } from '../../../../../domain/errors/DomainErrors';
-import { CrearGastoDatos, GrupoGastoRepository, GrupoResumen } from '../../../../../domain/ports/out/GrupoGastoRepository';
+import {
+  CrearGastoDatos,
+  GrupoGastoRepository,
+  GrupoResumen,
+  LiquidacionPendiente,
+} from '../../../../../domain/ports/out/GrupoGastoRepository';
 import { verificarDatosFactura } from '../../../../../domain/services/verificadorFacturaInternacional';
 
 export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
   constructor(private readonly pool: Pool, private readonly poolHistorico: Pool) {}
 
-  async crearGrupo(usuarioId: number, nombre: string, descripcion?: string): Promise<GrupoResumen> {
+  async crearGrupo(
+    usuarioId: number,
+    nombre: string,
+    descripcion?: string,
+    integrantes: string[] = [],
+  ): Promise<GrupoResumen> {
     return this.enTransaccion(async (client) => {
       const resultado = await client.query(
         `INSERT INTO grupo (nombre, descripcion, creado_por)
@@ -23,17 +33,39 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
         [nombre, descripcion || null, usuarioId],
       );
       const grupo = resultado.rows[0];
+      let miembrosActivos = 1;
       await client.query(
         `INSERT INTO miembro_grupo (grupo_id, usuario_id, rol)
          VALUES ($1, $2, 'administrador')`,
         [grupo.id, usuarioId],
       );
+      for (const email of new Set(integrantes.map((valor) => valor.trim().toLowerCase()))) {
+        const resultadoUsuario = await client.query(
+          `SELECT id FROM usuario WHERE LOWER(email) = $1 AND estado = 'activo'`,
+          [email],
+        );
+        if (resultadoUsuario.rowCount === 0) throw new UsuarioNoEncontradoError(email);
+        const integranteId = Number(resultadoUsuario.rows[0].id);
+        if (integranteId === usuarioId) continue;
+        await client.query(
+          `INSERT INTO miembro_grupo (grupo_id, usuario_id, rol)
+           VALUES ($1, $2, 'miembro')`,
+          [grupo.id, integranteId],
+        );
+        miembrosActivos += 1;
+        await client.query(
+          `INSERT INTO notificacion (usuario_id, tipo, mensaje)
+           VALUES ($1, 'invitacion_grupo', 'Te agregaron a un grupo de gastos compartidos.')`,
+          [integranteId],
+        );
+        await this.registrarMovimiento(client, usuarioId, grupo.id, null, 'miembro_agregado', 'Se agregó un integrante al grupo.');
+      }
       return {
         id: grupo.id,
         nombre: grupo.nombre,
         descripcion: grupo.descripcion,
         rol: 'administrador',
-        miembrosActivos: 1,
+        miembrosActivos,
         fechaCreacion: grupo.fecha_creacion,
       };
     });
@@ -97,9 +129,18 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
     ).then((resultado) => resultado.rows);
   }
 
-  async agregarMiembro(actorId: number, grupoId: number, usuarioId: number): Promise<void> {
+  async agregarMiembro(actorId: number, grupoId: number, identificador: number | string): Promise<void> {
     await this.enTransaccion(async (client) => {
       await this.exigirAdministrador(client, actorId, grupoId);
+      let usuarioId = identificador;
+      if (typeof identificador === 'string') {
+        const usuarioPorCorreo = await client.query(
+          `SELECT id FROM usuario WHERE LOWER(email) = $1 AND estado = 'activo'`,
+          [identificador.trim().toLowerCase()],
+        );
+        if (usuarioPorCorreo.rowCount === 0) throw new UsuarioNoEncontradoError(identificador);
+        usuarioId = Number(usuarioPorCorreo.rows[0].id);
+      }
       const usuario = await client.query(
         `SELECT id FROM usuario WHERE id = $1 AND estado = 'activo'`,
         [usuarioId],
@@ -211,10 +252,21 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
       }
 
       const gastoResultado = await client.query(
-        `INSERT INTO gasto (grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria, tipo_division)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria, tipo_division, fecha_registro`,
-        [grupoId, pagadorId, datos.descripcion, datos.montoTotal, datos.fechaGasto, datos.categoria, datos.tipoDivision],
+        `INSERT INTO gasto
+          (grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria, tipo_division, origen_registro)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, grupo_id, pagador_id, descripcion, monto_total, fecha_gasto, categoria,
+                   tipo_division, origen_registro, fecha_registro`,
+        [
+          grupoId,
+          pagadorId,
+          datos.descripcion,
+          datos.montoTotal,
+          datos.fechaGasto,
+          datos.categoria,
+          datos.tipoDivision,
+          datos.origenRegistro ?? 'manual',
+        ],
       );
       const gasto = gastoResultado.rows[0];
       let comprobanteVerificacion;
@@ -264,7 +316,7 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
     await this.exigirMiembro(this.pool, usuarioId, grupoId);
     const resultado = await this.pool.query(
       `SELECT g.id, g.grupo_id, g.pagador_id, u.nombre AS pagador, g.descripcion,
-              g.monto_total, g.fecha_gasto, g.categoria, g.tipo_division, g.fecha_registro,
+              g.monto_total, g.fecha_gasto, g.categoria, g.tipo_division, g.origen_registro, g.fecha_registro,
               (SELECT json_build_object(
                 'archivoHash', cf.archivo_hash, 'comercio', cf.comercio, 'nit', cf.nit_normalizado,
                 'numeroFactura', cf.numero_factura_normalizado, 'cufe', cf.cufe,
@@ -288,31 +340,241 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
     return resultado.rows;
   }
 
-  async registrarPago(usuarioId: number, gastoId: number): Promise<void> {
+  async eliminarGasto(actorId: number, gastoId: number): Promise<void> {
     await this.enTransaccion(async (client) => {
-      const gasto = await client.query(`SELECT id, grupo_id, pagador_id FROM gasto WHERE id = $1`, [gastoId]);
-      if (gasto.rowCount === 0) throw new GastoNoEncontradoError(gastoId);
-      const { grupo_id: grupoId, pagador_id: pagadorId } = gasto.rows[0];
-      await this.exigirMiembro(client, usuarioId, grupoId, true);
-
-      const pago = await client.query(
-        `UPDATE participacion_gasto
-         SET estado_pago = 'pagado', fecha_pago = NOW()
-         WHERE gasto_id = $1 AND usuario_id = $2 AND estado_pago = 'pendiente'
-         RETURNING id`,
-        [gastoId, usuarioId],
+      const referencia = await client.query(
+        `SELECT grupo_id FROM gasto WHERE id = $1`,
+        [gastoId],
       );
-      if (pago.rowCount === 0) {
-        throw new ConflictoEstadoError('No existe un pago pendiente de este usuario para el gasto.');
+      if (referencia.rowCount === 0) throw new GastoNoEncontradoError(gastoId);
+      const grupoId = Number(referencia.rows[0].grupo_id);
+      await this.exigirMiembro(client, actorId, grupoId, true);
+
+      const gastoResultado = await client.query(
+        `SELECT pagador_id, descripcion FROM gasto WHERE id = $1 FOR UPDATE`,
+        [gastoId],
+      );
+      if (Number(gastoResultado.rows[0].pagador_id) !== actorId) {
+        throw new AccesoDenegadoError('Solo quien registró el gasto puede eliminarlo.');
       }
-      await this.registrarMovimiento(client, usuarioId, grupoId, gastoId, 'pago_registrado', 'Se confirmó el pago de una participación.');
-      if (pagadorId !== usuarioId) {
-        await client.query(
-          `INSERT INTO notificacion (usuario_id, tipo, mensaje)
-           VALUES ($1, 'pago_recibido', 'Un integrante confirmó el pago de un gasto.')`,
-          [pagadorId],
+
+      const pagosConfirmados = await client.query(
+        `SELECT 1 FROM participacion_gasto
+         WHERE gasto_id = $1 AND usuario_id <> $2 AND estado_pago = 'pagado'
+         LIMIT 1`,
+        [gastoId, actorId],
+      );
+      if (pagosConfirmados.rows.length > 0) {
+        throw new ConflictoEstadoError('No se puede eliminar un gasto con pagos confirmados. Registra una corrección en lugar de borrarlo.');
+      }
+      const liquidaciones = await client.query(
+        `SELECT 1
+         FROM liquidacion_pago l
+         WHERE l.grupo_id = $1
+           AND l.acreedor_id = $2
+           AND (l.gasto_id IS NULL OR l.gasto_id = $3)
+           AND l.deudor_id IN (
+             SELECT usuario_id FROM participacion_gasto
+             WHERE gasto_id = $3 AND usuario_id <> $2
+           )
+         LIMIT 1`,
+        [grupoId, actorId, gastoId],
+      );
+      if (liquidaciones.rows.length > 0) {
+        throw new ConflictoEstadoError('No se puede eliminar un gasto relacionado con una liquidación reportada. Registra una corrección en lugar de borrarlo.');
+      }
+
+      await this.registrarMovimiento(
+        client,
+        actorId,
+        grupoId,
+        null,
+        'gasto_eliminado',
+        `Se eliminó el gasto #${gastoId}: ${gastoResultado.rows[0].descripcion}.`,
+      );
+      await client.query(`DELETE FROM gasto WHERE id = $1`, [gastoId]);
+      await this.recalcularBalances(client, grupoId);
+    });
+  }
+
+  async registrarPago(usuarioId: number, gastoId: number): Promise<LiquidacionPendiente> {
+    const gasto = await this.pool.query(
+      `SELECT grupo_id, pagador_id FROM gasto WHERE id = $1`,
+      [gastoId],
+    );
+    if (gasto.rowCount === 0) throw new GastoNoEncontradoError(gastoId);
+
+    const grupoId = Number(gasto.rows[0].grupo_id);
+    const acreedorId = Number(gasto.rows[0].pagador_id);
+    const participacion = await this.pool.query(
+      `SELECT monto_asignado FROM participacion_gasto
+       WHERE gasto_id = $1 AND usuario_id = $2 AND estado_pago = 'pendiente'`,
+      [gastoId, usuarioId],
+    );
+    if (participacion.rowCount === 0 || usuarioId === acreedorId) {
+      throw new ConflictoEstadoError('No existe un pago pendiente de este usuario para el gasto.');
+    }
+
+    return this.reportarLiquidacion(
+      usuarioId,
+      grupoId,
+      acreedorId,
+      Number(participacion.rows[0].monto_asignado),
+      gastoId,
+    );
+  }
+
+  async listarLiquidacionesPendientes(usuarioId: number, grupoId: number): Promise<LiquidacionPendiente[]> {
+    await this.exigirMiembro(this.pool, usuarioId, grupoId);
+    const resultado = await this.pool.query(
+      `SELECT l.id, l.grupo_id AS "grupoId", l.gasto_id AS "gastoId",
+              l.deudor_id AS "deudorId", deudor.nombre AS deudor,
+              l.acreedor_id AS "acreedorId", acreedor.nombre AS acreedor,
+              l.monto, l.fecha_reporte AS "fechaReporte"
+       FROM liquidacion_pago l
+       JOIN usuario deudor ON deudor.id = l.deudor_id
+       JOIN usuario acreedor ON acreedor.id = l.acreedor_id
+       WHERE l.grupo_id = $1 AND l.estado = 'pendiente'
+         AND (l.deudor_id = $2 OR l.acreedor_id = $2)
+       ORDER BY l.fecha_reporte, l.id`,
+      [grupoId, usuarioId],
+    );
+    return resultado.rows;
+  }
+
+  async reportarLiquidacion(
+    deudorId: number,
+    grupoId: number,
+    acreedorId: number,
+    monto: number,
+    gastoId?: number,
+  ): Promise<LiquidacionPendiente> {
+    return this.enTransaccion(async (client) => {
+      await this.exigirMiembro(client, deudorId, grupoId, true);
+      const acreedor = await client.query(
+        `SELECT 1 FROM miembro_grupo
+         WHERE grupo_id = $1 AND usuario_id = $2 AND estado = 'activo'`,
+        [grupoId, acreedorId],
+      );
+      if (acreedor.rowCount === 0) {
+        throw new ValidacionError('El acreedor debe pertenecer al grupo y estar activo.');
+      }
+      if (deudorId === acreedorId) throw new ValidacionError('No puedes liquidar una deuda contigo mismo.');
+
+      const montoCentavos = Math.round(monto * 100);
+      if (gastoId !== undefined) {
+        const participacion = await client.query(
+          `SELECT p.monto_asignado
+           FROM participacion_gasto p
+           JOIN gasto g ON g.id = p.gasto_id
+           WHERE g.id = $1 AND g.grupo_id = $2 AND g.pagador_id = $3
+             AND p.usuario_id = $4 AND p.estado_pago = 'pendiente'`,
+          [gastoId, grupoId, acreedorId, deudorId],
         );
+        if (participacion.rowCount === 0
+          || Math.round(Number(participacion.rows[0].monto_asignado) * 100) !== montoCentavos) {
+          throw new ConflictoEstadoError('El gasto ya no tiene una participación pendiente por ese monto.');
+        }
       }
+      const balance = await client.query(
+        `SELECT monto FROM balance WHERE grupo_id = $1 AND deudor_id = $2 AND acreedor_id = $3`,
+        [grupoId, deudorId, acreedorId],
+      );
+      const pendiente = await client.query(
+        `SELECT COALESCE(SUM(monto), 0) AS monto
+         FROM liquidacion_pago
+         WHERE grupo_id = $1 AND deudor_id = $2 AND acreedor_id = $3 AND estado = 'pendiente'`,
+        [grupoId, deudorId, acreedorId],
+      );
+      if (Number(pendiente.rows[0].monto) > 0) {
+        throw new ConflictoEstadoError('Ya existe un pago pendiente de confirmación entre estas personas.');
+      }
+      const disponibleCentavos = Math.round(Number(balance.rows[0]?.monto ?? 0) * 100)
+        - Math.round(Number(pendiente.rows[0].monto) * 100);
+      if (montoCentavos <= 0 || montoCentavos > disponibleCentavos) {
+        throw new ConflictoEstadoError('El monto reportado supera la deuda disponible o ya tiene un pago pendiente de confirmación.');
+      }
+
+      const creado = await client.query(
+        `INSERT INTO liquidacion_pago (grupo_id, gasto_id, deudor_id, acreedor_id, monto)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, grupo_id AS "grupoId", gasto_id AS "gastoId", deudor_id AS "deudorId",
+                   acreedor_id AS "acreedorId", monto, fecha_reporte AS "fechaReporte"`,
+        [grupoId, gastoId ?? null, deudorId, acreedorId, montoCentavos / 100],
+      );
+      await this.registrarMovimiento(
+        client,
+        deudorId,
+        grupoId,
+        null,
+        'pago_reportado',
+        `Se reportó una transferencia de ${montoCentavos / 100} para confirmar.`,
+      );
+      await client.query(
+        `INSERT INTO notificacion (usuario_id, tipo, mensaje)
+         VALUES ($1, 'pago_reportado', 'Un integrante reportó un pago pendiente de tu confirmación.')`,
+        [acreedorId],
+      );
+      const nombres = await client.query(
+        `SELECT
+           (SELECT nombre FROM usuario WHERE id = $1) AS deudor,
+           (SELECT nombre FROM usuario WHERE id = $2) AS acreedor`,
+        [deudorId, acreedorId],
+      );
+      return {
+        ...creado.rows[0],
+        deudor: nombres.rows[0].deudor,
+        acreedor: nombres.rows[0].acreedor,
+      };
+    });
+  }
+
+  async confirmarLiquidacion(acreedorId: number, grupoId: number, liquidacionId: number): Promise<void> {
+    await this.enTransaccion(async (client) => {
+      await this.exigirMiembro(client, acreedorId, grupoId, true);
+      const resultado = await client.query(
+        `SELECT deudor_id, acreedor_id, monto, estado
+         FROM liquidacion_pago
+         WHERE id = $1 AND grupo_id = $2
+         FOR UPDATE`,
+        [liquidacionId, grupoId],
+      );
+      if (resultado.rowCount === 0) throw new GastoNoEncontradoError(liquidacionId);
+      const liquidacion = resultado.rows[0];
+      if (Number(liquidacion.acreedor_id) !== acreedorId) {
+        throw new AccesoDenegadoError('Solo el acreedor puede confirmar la recepción del pago.');
+      }
+      if (liquidacion.estado !== 'pendiente') {
+        throw new ConflictoEstadoError('Este pago ya fue confirmado.');
+      }
+
+      const balance = await client.query(
+        `SELECT monto FROM balance WHERE grupo_id = $1 AND deudor_id = $2 AND acreedor_id = $3`,
+        [grupoId, liquidacion.deudor_id, acreedorId],
+      );
+      if (Math.round(Number(balance.rows[0]?.monto ?? 0) * 100) < Math.round(Number(liquidacion.monto) * 100)) {
+        throw new ConflictoEstadoError('La deuda cambió y ya no cubre el monto reportado.');
+      }
+
+      await client.query(
+        `UPDATE liquidacion_pago
+         SET estado = 'confirmada', fecha_confirmacion = NOW()
+         WHERE id = $1`,
+        [liquidacionId],
+      );
+      await this.registrarMovimiento(
+        client,
+        acreedorId,
+        grupoId,
+        null,
+        'pago_registrado',
+        `Se confirmó la recepción de una transferencia de ${liquidacion.monto}.`,
+      );
+      await client.query(
+        `INSERT INTO notificacion (usuario_id, tipo, mensaje)
+         VALUES ($1, 'pago_recibido', 'El acreedor confirmó la recepción de tu pago.')`,
+        [liquidacion.deudor_id],
+      );
       await this.recalcularBalances(client, grupoId);
     });
   }
@@ -445,19 +707,24 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
   private async recalcularBalances(client: PoolClient, grupoId: number): Promise<void> {
     await client.query(`DELETE FROM balance WHERE grupo_id = $1`, [grupoId]);
     await client.query(
-      `WITH deudas AS (
+      `WITH movimientos AS (
          SELECT p.usuario_id AS deudor_id, g.pagador_id AS acreedor_id,
                 SUM(p.monto_asignado) AS monto
          FROM participacion_gasto p
          JOIN gasto g ON g.id = p.gasto_id
          WHERE g.grupo_id = $1 AND p.estado_pago = 'pendiente' AND p.usuario_id <> g.pagador_id
          GROUP BY p.usuario_id, g.pagador_id
+         UNION ALL
+         SELECT deudor_id, acreedor_id, -SUM(monto) AS monto
+         FROM liquidacion_pago
+         WHERE grupo_id = $1 AND estado = 'confirmada'
+         GROUP BY deudor_id, acreedor_id
        ), pares AS (
          SELECT LEAST(deudor_id, acreedor_id) AS usuario_a,
                 GREATEST(deudor_id, acreedor_id) AS usuario_b,
                 SUM(CASE WHEN deudor_id < acreedor_id THEN monto ELSE 0 END) AS deuda_a_b,
                 SUM(CASE WHEN deudor_id > acreedor_id THEN monto ELSE 0 END) AS deuda_b_a
-         FROM deudas
+         FROM movimientos
          GROUP BY LEAST(deudor_id, acreedor_id), GREATEST(deudor_id, acreedor_id)
        )
        INSERT INTO balance (grupo_id, deudor_id, acreedor_id, monto)

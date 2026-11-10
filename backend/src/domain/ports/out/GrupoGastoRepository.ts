@@ -17,21 +17,44 @@ export interface CrearGastoDatos {
   categoria: string;
   pagadorId?: number;
   tipoDivision: 'equitativa' | 'personalizada';
+  origenRegistro?: 'manual' | 'ocr';
   participaciones: ParticipacionCalculada[];
   comprobante?: ComprobanteFactura;
 }
 
+export interface LiquidacionPendiente {
+  id: number;
+  grupoId: number;
+  gastoId: number | null;
+  deudorId: number;
+  deudor: string;
+  acreedorId: number;
+  acreedor: string;
+  monto: string;
+  fechaReporte: Date;
+}
+
 export interface GrupoGastoRepository {
-  crearGrupo(usuarioId: number, nombre: string, descripcion?: string): Promise<GrupoResumen>;
+  crearGrupo(usuarioId: number, nombre: string, descripcion?: string, integrantes?: string[]): Promise<GrupoResumen>;
   listarGrupos(usuarioId: number): Promise<GrupoResumen[]>;
   archivarGrupo(actorId: number, grupoId: number): Promise<void>;
   listarGruposArchivados(usuarioId: number): Promise<unknown[]>;
   listarIntegrantes(usuarioId: number, grupoId: number): Promise<unknown[]>;
-  agregarMiembro(actorId: number, grupoId: number, usuarioId: number): Promise<void>;
+  agregarMiembro(actorId: number, grupoId: number, usuarioId: number | string): Promise<void>;
   quitarMiembro(actorId: number, grupoId: number, usuarioId: number): Promise<void>;
   crearGasto(actorId: number, grupoId: number, datos: CrearGastoDatos): Promise<unknown>;
   listarGastos(usuarioId: number, grupoId: number): Promise<unknown[]>;
-  registrarPago(usuarioId: number, gastoId: number): Promise<void>;
+  eliminarGasto(actorId: number, gastoId: number): Promise<void>;
+  registrarPago(usuarioId: number, gastoId: number): Promise<LiquidacionPendiente>;
+  listarLiquidacionesPendientes(usuarioId: number, grupoId: number): Promise<LiquidacionPendiente[]>;
+  reportarLiquidacion(
+    deudorId: number,
+    grupoId: number,
+    acreedorId: number,
+    monto: number,
+    gastoId?: number,
+  ): Promise<LiquidacionPendiente>;
+  confirmarLiquidacion(acreedorId: number, grupoId: number, liquidacionId: number): Promise<void>;
   listarBalances(usuarioId: number, grupoId: number): Promise<unknown[]>;
   listarHistorial(usuarioId: number, grupoId: number, limite: number): Promise<unknown[]>;
   obtenerResumen(usuarioId: number): Promise<unknown>;

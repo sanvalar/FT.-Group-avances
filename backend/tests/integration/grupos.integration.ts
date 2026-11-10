@@ -25,16 +25,23 @@ afterAll(async () => {
 
 describe('Integración · Grupos, gastos y balances', () => {
   it('crea un grupo y el creador queda como administrador', async () => {
-    const respuesta = await request(app).post('/api/grupos').set(bearer(ana)).send({ nombre: 'Apartamento 402', descripcion: 'Gastos del apto' });
+    const respuesta = await request(app).post('/api/grupos').set(bearer(ana)).send({
+      nombre: 'Apartamento 402',
+      descripcion: 'Gastos del apto',
+      integrantes: [beto.email],
+    });
     expect(respuesta.status).toBe(201);
     grupoId = respuesta.body.grupo.id;
 
     const integrantes = await request(app).get(`/api/grupos/${grupoId}/integrantes`).set(bearer(ana));
-    expect(integrantes.body.integrantes).toEqual([expect.objectContaining({ id: ana.id, rol: 'administrador' })]);
+    expect(integrantes.body.integrantes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: ana.id, rol: 'administrador' }),
+      expect.objectContaining({ id: beto.id, rol: 'miembro' }),
+    ]));
   });
 
   it('el administrador agrega integrantes y ellos reciben notificación', async () => {
-    for (const miembro of [beto, carla]) {
+    for (const miembro of [carla]) {
       const respuesta = await request(app).post(`/api/grupos/${grupoId}/integrantes`).set(bearer(ana)).send({ usuarioId: miembro.id });
       expect(respuesta.status).toBe(204);
     }
@@ -108,15 +115,78 @@ describe('Integración · Grupos, gastos y balances', () => {
     expect(respuesta.status).toBe(400);
   });
 
-  it('el deudor confirma su pago y el balance se recalcula', async () => {
+  it('reporta el pago y solo lo elimina del balance cuando el acreedor confirma', async () => {
     const gastos = await request(app).get(`/api/grupos/${grupoId}/gastos`).set(bearer(beto));
     const gastoId = gastos.body.gastos[0].id;
 
-    expect((await request(app).post(`/api/grupos/gastos/${gastoId}/pagos`).set(bearer(beto))).status).toBe(204);
-    expect((await request(app).post(`/api/grupos/gastos/${gastoId}/pagos`).set(bearer(beto))).status).toBe(409);
+    const reportado = await request(app).post(`/api/grupos/gastos/${gastoId}/pagos`).set(bearer(beto));
+    expect(reportado.status).toBe(201);
+    const liquidacionId = reportado.body.liquidacion.id;
+    expect(reportado.body.liquidacion.gastoId).toBe(gastoId);
 
     const balances = await request(app).get(`/api/grupos/${grupoId}/balances`).set(bearer(beto));
-    expect(balances.body.balances.find((b: { deudorId: number }) => b.deudorId === beto.id)).toBeUndefined();
+    expect(balances.body.balances.find((b: { deudorId: number }) => b.deudorId === beto.id)).toBeDefined();
+
+    expect((await request(app).post(`/api/grupos/${grupoId}/liquidaciones/${liquidacionId}/confirmar`).set(bearer(beto))).status).toBe(403);
+    expect((await request(app).post(`/api/grupos/${grupoId}/liquidaciones/${liquidacionId}/confirmar`).set(bearer(ana))).status).toBe(204);
+    expect((await request(app).post(`/api/grupos/${grupoId}/liquidaciones/${liquidacionId}/confirmar`).set(bearer(ana))).status).toBe(409);
+
+    const saldoFinal = await request(app).get(`/api/grupos/${grupoId}/balances`).set(bearer(beto));
+    expect(saldoFinal.body.balances.find((b: { deudorId: number }) => b.deudorId === beto.id)).toBeUndefined();
+  });
+
+  it('permite al acreedor consultar y confirmar una liquidación pendiente', async () => {
+    const balances = await request(app).get(`/api/grupos/${grupoId}/balances`).set(bearer(carla));
+    const deuda = balances.body.balances.find((b: { deudorId: number }) => b.deudorId === carla.id);
+    expect(deuda).toBeDefined();
+
+    const reporte = await request(app).post(`/api/grupos/${grupoId}/liquidaciones`).set(bearer(carla)).send({
+      acreedorId: ana.id,
+      monto: Number(deuda.monto),
+    });
+    expect(reporte.status).toBe(201);
+    expect(reporte.body.liquidacion).toMatchObject({
+      deudorId: carla.id,
+      acreedorId: ana.id,
+    });
+
+    const pendientes = await request(app).get(`/api/grupos/${grupoId}/liquidaciones`).set(bearer(ana));
+    expect(pendientes.body.liquidaciones).toEqual([
+      expect.objectContaining({ id: reporte.body.liquidacion.id, gastoId: null }),
+    ]);
+
+    const saldoPrevio = await request(app).get(`/api/grupos/${grupoId}/balances`).set(bearer(carla));
+    expect(saldoPrevio.body.balances.find((b: { deudorId: number }) => b.deudorId === carla.id)).toBeDefined();
+
+    expect((await request(app)
+      .post(`/api/grupos/${grupoId}/liquidaciones/${reporte.body.liquidacion.id}/confirmar`)
+      .set(bearer(ana))).status).toBe(204);
+    const saldoFinal = await request(app).get(`/api/grupos/${grupoId}/balances`).set(bearer(carla));
+    expect(saldoFinal.body.balances.find((b: { deudorId: number }) => b.deudorId === carla.id)).toBeUndefined();
+  });
+
+  it('elimina un gasto no pagado en el servidor y conserva el movimiento de auditoría', async () => {
+    const grupo = await request(app).post('/api/grupos').set(bearer(ana)).send({
+      nombre: 'Grupo para eliminar gasto',
+      integrantes: [intruso.email],
+    });
+    const id = grupo.body.grupo.id;
+    const gasto = await request(app).post(`/api/grupos/${id}/gastos`).set(bearer(ana)).send({
+      descripcion: 'Compra duplicada',
+      montoTotal: 5000,
+      fechaGasto: '2026-10-23',
+      categoria: 'alimentacion',
+      tipoDivision: 'equitativa',
+      usuarioIds: [ana.id, intruso.id],
+    });
+    expect(gasto.status).toBe(201);
+
+    expect((await request(app).delete(`/api/grupos/gastos/${gasto.body.gasto.id}`).set(bearer(intruso))).status).toBe(403);
+    expect((await request(app).delete(`/api/grupos/gastos/${gasto.body.gasto.id}`).set(bearer(ana))).status).toBe(204);
+    const gastos = await request(app).get(`/api/grupos/${id}/gastos`).set(bearer(ana));
+    expect(gastos.body.gastos).toHaveLength(0);
+    const historial = await request(app).get(`/api/grupos/${id}/historial`).set(bearer(ana));
+    expect(historial.body.movimientos.some((m: { tipoMovimiento: string }) => m.tipoMovimiento === 'gasto_eliminado')).toBe(true);
   });
 
   it('el historial registra los movimientos del grupo', async () => {

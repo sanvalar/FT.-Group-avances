@@ -42,7 +42,12 @@ import { AsistenteController } from '../adapters/in/http/controllers/AsistenteCo
 const usuarioRepository = new PostgresUsuarioRepository(pool);
 const refreshTokenRepository = new PostgresRefreshTokenRepository(pool);
 const passwordHasher = new Argon2PasswordHasher();
-const tokenService = new JwtTokenService(env.jwtSecret, env.jwtExpiracion);
+const tokenService = new JwtTokenService(
+  env.jwtSecret,
+  env.jwtExpiracion,
+  env.jwtIssuer,
+  env.jwtAudience,
+);
 
 // --- Casos de uso (capa de aplicacion) ---
 export const registrarUsuarioUseCase = new RegistrarUsuarioUseCaseImpl(usuarioRepository, passwordHasher);

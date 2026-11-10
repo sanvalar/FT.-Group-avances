@@ -17,10 +17,23 @@ export const notificacionParamsSchema = z.object({ notificacionId: idRuta });
 export const crearGrupoSchema = z.object({
   nombre: z.string().trim().min(2).max(120),
   descripcion: z.string().trim().max(2000).optional(),
+  integrantes: z.array(z.string().trim().email().max(150)).max(100).optional(),
 });
 
-export const miembroSchema = z.object({
-  usuarioId: z.number().int().positive(),
+export const miembroSchema = z.union([
+  z.object({ usuarioId: z.number().int().positive() }).strict(),
+  z.object({ email: z.string().trim().email().max(150) }).strict(),
+]);
+
+export const liquidacionSchema = z.object({
+  acreedorId: z.number().int().positive(),
+  monto: z.number().positive()
+    .refine((monto) => Math.abs(monto * 100 - Math.round(monto * 100)) < 0.000001, 'El monto admite como máximo dos decimales.'),
+});
+
+export const liquidacionParamsSchema = z.object({
+  grupoId: idRuta,
+  liquidacionId: idRuta,
 });
 
 const gastoComun = {
@@ -29,6 +42,7 @@ const gastoComun = {
   fechaGasto: fechaISO,
   categoria: z.string().trim().min(1).max(60),
   pagadorId: z.number().int().positive().optional(),
+  origenRegistro: z.enum(['manual', 'ocr']).optional(),
   comprobante: z.object({
     archivoHash: z.string().regex(/^[a-f0-9]{64}$/i),
     comercio: z.string().trim().max(120).nullable(),

@@ -22,12 +22,6 @@ const mediana = xs => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
-const desviacion = xs => {
-  if (xs.length < 2) return 0
-  const mu = media(xs)
-  return Math.sqrt(media(xs.map(x => (x - mu) ** 2)))
-}
-
 const diasDelMes = (anio, mes) => new Date(anio, mes, 0).getDate()
 
 const periodoAnterior = p => {
@@ -40,6 +34,11 @@ const siguientePeriodo = p => {
   return m === 12 ? `${a + 1}-01` : `${a}-${String(m + 1).padStart(2, '0')}`
 }
 
+const sumarMes = p => {
+  const [anio, mes] = p.split('-').map(Number)
+  return mes === 12 ? `${anio + 1}-01` : `${anio}-${String(mes + 1).padStart(2, '0')}`
+}
+
 /** Serie de gasto mensual, en orden cronológico. */
 export function serieMensual(gastos) {
   const acum = new Map()
@@ -50,7 +49,13 @@ export function serieMensual(gastos) {
     fila.num_gastos += 1
     acum.set(p, fila)
   }
-  return [...acum.values()].sort((a, b) => a.periodo.localeCompare(b.periodo))
+  const periodos = [...acum.keys()].sort()
+  if (!periodos.length) return []
+  const serie = []
+  for (let p = periodos[0]; p <= periodos.at(-1); p = sumarMes(p)) {
+    serie.push(acum.get(p) || { periodo: p, total: 0, num_gastos: 0 })
+  }
+  return serie
 }
 
 /* ------------------------------------------------------------------ */
@@ -86,7 +91,50 @@ function diasLiquidacion(gastos) {
   return dias.length ? media(dias) : null
 }
 
-export function indicadores(gastos, me) {
+function sumarPeriodo(gastos, desde, hasta, selector = () => 'total') {
+  const acumulados = new Map()
+  for (const gasto of gastos) {
+    if (gasto.fecha_gasto < desde || gasto.fecha_gasto > hasta) continue
+    const clave = selector(gasto)
+    if (clave === null || clave === undefined || clave === '') continue
+    acumulados.set(clave, (acumulados.get(clave) || 0) + gasto.monto_total)
+  }
+  return acumulados
+}
+
+function comparacionSegmentos(gastos, hoy) {
+  const fecha = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())
+  const actualDesde = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-01`
+  const actualHasta = `${actualDesde.slice(0, 7)}-${String(fecha.getDate()).padStart(2, '0')}`
+  const anterior = new Date(fecha.getFullYear(), fecha.getMonth() - 1, 1)
+  const corteAnterior = Math.min(fecha.getDate(), diasDelMes(anterior.getFullYear(), anterior.getMonth() + 1))
+  const anteriorDesde = `${anterior.getFullYear()}-${String(anterior.getMonth() + 1).padStart(2, '0')}-01`
+  const anteriorHasta = `${anteriorDesde.slice(0, 7)}-${String(corteAnterior).padStart(2, '0')}`
+  const categoriasActual = sumarPeriodo(gastos, actualDesde, actualHasta, g => g.categoria || 'otro')
+  const categoriasAnterior = sumarPeriodo(gastos, anteriorDesde, anteriorHasta, g => g.categoria || 'otro')
+  const gruposActual = sumarPeriodo(gastos, actualDesde, actualHasta, g => g.grupo?.nombre || String(g.grupo_id ?? 'sin grupo'))
+  const gruposAnterior = sumarPeriodo(gastos, anteriorDesde, anteriorHasta, g => g.grupo?.nombre || String(g.grupo_id ?? 'sin grupo'))
+  const combinar = (actual, pasado) => [...new Set([...actual.keys(), ...pasado.keys()])]
+    .map(clave => {
+      const montoActual = actual.get(clave) || 0
+      const montoAnterior = pasado.get(clave) || 0
+      return {
+        clave,
+        actual: montoActual,
+        anterior: montoAnterior,
+        variacion: montoAnterior > 0 ? ((montoActual - montoAnterior) / montoAnterior) * 100 : null,
+      }
+    })
+    .sort((a, b) => b.actual - a.actual)
+  return {
+    actual: { desde: actualDesde, hasta: actualHasta },
+    anterior: { desde: anteriorDesde, hasta: anteriorHasta },
+    categorias: combinar(categoriasActual, categoriasAnterior),
+    grupos: combinar(gruposActual, gruposAnterior),
+  }
+}
+
+export function indicadores(gastos, me, { hoy = new Date() } = {}) {
   if (!gastos.length) return null
 
   const montos = gastos.map(g => g.monto_total)
@@ -131,6 +179,7 @@ export function indicadores(gastos, me) {
     serie,
     por_categoria: orden(porCategoria),
     por_grupo: orden(porGrupo),
+    comparacion_periodos: comparacionSegmentos(gastos, hoy),
     personal: { debe, le_deben: leDeben, balance: leDeben - debe, aportado, asignado },
   }
 }
@@ -141,8 +190,25 @@ export function indicadores(gastos, me) {
 
 const ALFA = 0.4        // ponderación del suavizado exponencial
 const VENTANA_DIAS = 7  // días de la media móvil
-const UMBRAL_Z = 2      // desviaciones a partir de las cuales un gasto es atípico
+const UMBRAL_ROBUSTO = 3.5
 const R2_MINIMO = 0.3   // ajuste mínimo para considerar que hay tendencia
+
+function cuantil(valores, q) {
+  if (!valores.length) return 0
+  const ordenados = [...valores].sort((a, b) => a - b)
+  const posicion = (ordenados.length - 1) * q
+  const inferior = Math.floor(posicion)
+  const fraccion = posicion - inferior
+  return ordenados[inferior] + (ordenados[inferior + 1] - ordenados[inferior] || 0) * fraccion
+}
+
+function estadisticasRobustas(valores) {
+  const centro = mediana(valores)
+  const mad = mediana(valores.map(valor => Math.abs(valor - centro)))
+  const rangoIntercuartil = cuantil(valores, 0.75) - cuantil(valores, 0.25)
+  const escala = mad > 0 ? mad * 1.4826 : rangoIntercuartil / 1.349
+  return { centro, escala }
+}
 
 /** Mínimos cuadrados sobre la serie. Devuelve intercepto, pendiente y R². */
 export function regresion(valores) {
@@ -166,8 +232,8 @@ export function suavizado(valores, alfa = ALFA) {
 
 /**
  * Índice estacional por mes calendario: 1,3 en diciembre significa que ese mes
- * gasta un 30 % por encima del promedio. Con una sola observación el factor se
- * atenúa hacia 1 para no sobreajustar.
+ * gasta un 30 % por encima del promedio. Se requieren dos años/observaciones
+ * del mes para evitar ajustar la proyección a un caso aislado.
  */
 export function indicesEstacionales(serie) {
   const general = media(serie.map(s => s.total))
@@ -179,23 +245,107 @@ export function indicesEstacionales(serie) {
   }
   const out = {}
   for (const [mes, valores] of porMes) {
+    if (valores.length < 2) {
+      out[mes] = 1
+      continue
+    }
     const crudo = media(valores) / general
-    const peso = Math.min(valores.length / 2, 1)
-    out[mes] = 1 + (crudo - 1) * peso
+    out[mes] = crudo
   }
   return out
 }
 
-/** Gastos inusualmente altos o bajos, por puntaje z. */
-export function atipicos(gastos, umbral = UMBRAL_Z) {
-  const montos = gastos.map(g => g.monto_total)
-  const mu = media(montos), sd = desviacion(montos)
-  if (!sd) return []
-  return gastos
-    .map(g => ({ ...g, z: (g.monto_total - mu) / sd }))
-    .filter(g => Math.abs(g.z) >= umbral)
-    .sort((a, b) => Math.abs(b.z) - Math.abs(a.z))
-    .slice(0, 8)
+/** Compara cada gasto con referencias similares, usando mediana y MAD/IQR. */
+export function atipicos(gastos, umbral = UMBRAL_ROBUSTO) {
+  const crearCubetas = selector => {
+    const cubetas = new Map()
+    for (const gasto of gastos) {
+      const clave = selector(gasto)
+      const filas = cubetas.get(clave) || []
+      filas.push(gasto)
+      cubetas.set(clave, filas)
+    }
+    return cubetas
+  }
+  const porGrupoCategoria = crearCubetas(g => JSON.stringify([g.grupo_id ?? null, g.categoria ?? null]))
+  const porCategoria = crearCubetas(g => g.categoria ?? null)
+  const porGrupo = crearCubetas(g => g.grupo_id ?? null)
+  const prepararCubetas = cubetas => new Map([...cubetas].map(([clave, filas]) => [
+    clave,
+    filas.length >= 5 ? { cantidad: filas.length, ...estadisticasRobustas(filas.map(g => g.monto_total)) } : null,
+  ]))
+  const datosGrupoCategoria = prepararCubetas(porGrupoCategoria)
+  const datosCategoria = prepararCubetas(porCategoria)
+  const datosGrupo = prepararCubetas(porGrupo)
+  const datosGlobales = gastos.length >= 5
+    ? { cantidad: gastos.length, ...estadisticasRobustas(gastos.map(g => g.monto_total)) }
+    : null
+  const anomalos = []
+  for (const gasto of gastos) {
+    const comparables = [
+      { fuente: 'mismo grupo y categoría', datos: datosGrupoCategoria.get(JSON.stringify([gasto.grupo_id ?? null, gasto.categoria ?? null])) },
+      { fuente: 'misma categoría', datos: datosCategoria.get(gasto.categoria ?? null) },
+      { fuente: 'mismo grupo', datos: datosGrupo.get(gasto.grupo_id ?? null) },
+      { fuente: 'todos los gastos', datos: datosGlobales },
+    ].find(candidato => candidato.datos)
+    if (!comparables) continue
+
+    const { centro, escala } = comparables.datos
+    const diferencia = gasto.monto_total - centro
+    const z = escala > 0 ? diferencia / escala : diferencia === 0 ? 0 : Math.sign(diferencia) * umbral
+    if (Math.abs(z) >= umbral) {
+      anomalos.push({
+        ...gasto,
+        z,
+        mediana_comparable: centro,
+        referencia: comparables.fuente,
+        cantidad_referencias: comparables.datos.cantidad - 1,
+      })
+    }
+  }
+  return anomalos.sort((a, b) => Math.abs(b.z) - Math.abs(a.z)).slice(0, 8)
+}
+
+function pronosticoSiguienteMes(valores) {
+  const base = valores.slice(-12)
+  const mediaReciente = media(base.slice(-3))
+  const exponencial = suavizado(base)
+  const { b0, b1, r2 } = regresion(base)
+  const lineal = Math.max(b0 + b1 * base.length, 0)
+  const candidatos = [mediaReciente, exponencial]
+  if (base.length >= 4 && r2 >= R2_MINIMO) candidatos.push(lineal)
+  return { valor: media(candidatos), r2 }
+}
+
+function evaluarPronostico(serie) {
+  const errores = []
+  for (let indice = 3; indice < serie.length; indice += 1) {
+    const historialSerie = serie.slice(0, indice)
+    const historial = historialSerie.map(fila => fila.total)
+    const esperado = serie[indice].total
+    const mesObjetivo = Number(serie[indice].periodo.slice(5))
+    const factorEstacional = indicesEstacionales(historialSerie)[mesObjetivo] ?? 1
+    const pronosticado = pronosticoSiguienteMes(historial).valor * factorEstacional
+    errores.push({
+      periodo: serie[indice].periodo,
+      errorAbsoluto: Math.abs(esperado - pronosticado),
+      errorPorcentual: esperado > 0 ? Math.abs(esperado - pronosticado) / esperado * 100 : null,
+    })
+  }
+  const porcentuales = errores.map(error => error.errorPorcentual).filter(Number.isFinite)
+  const margen80 = porcentuales.length >= 3 ? cuantil(errores.map(error => error.errorAbsoluto), 0.8) : null
+  const errorPorcentualMedio = porcentuales.length ? media(porcentuales) : null
+  const nivel = porcentuales.length < 3 ? 'insuficiente'
+    : errorPorcentualMedio <= 15 ? 'alto'
+      : errorPorcentualMedio <= 30 ? 'medio' : 'bajo'
+  return {
+    mesesEvaluados: errores.length,
+    errorAbsolutoMedio: errores.length ? media(errores.map(error => error.errorAbsoluto)) : null,
+    errorPorcentualMedio,
+    margen80,
+    nivel,
+    errores,
+  }
 }
 
 export function estimadores(gastos, serie, { horizonte = 3, hoy = new Date() } = {}) {
@@ -253,17 +403,28 @@ export function estimadores(gastos, serie, { horizonte = 3, hoy = new Date() } =
     : 'estable'
 
   // Proyección: el consenso marca el nivel y el índice estacional lo corrige.
-  const cerrada = abierto && serie.length > 1 ? serie.slice(0, -1) : serie
+  const cerrada = abierto ? serie.slice(0, -1) : serie
+  const basePronostico = cerrada.length ? cerrada.map(fila => fila.total) : [enCurso.total]
   const indices = indicesEstacionales(cerrada)
   const proyeccion = []
+  const evaluacion = evaluarPronostico(cerrada)
   // Si el mes actual ya tiene gastos, se proyecta a partir del siguiente;
   // si no, el propio mes actual es el primero por proyectar.
   let p = abierto ? enCurso.periodo : periodoAnterior(periodoActual)
   for (let i = 1; i <= horizonte; i++) {
     p = siguientePeriodo(p)
     const m = Number(p.slice(5))
-    const valor = (consenso + (tendencia === 'estable' ? 0 : b1 * i)) * (indices[m] ?? 1)
-    proyeccion.push({ periodo: p, total: Math.max(valor, 0), estimado: true })
+    const historial = i === 1 ? basePronostico : [...basePronostico, ...proyeccion.map(fila => fila.total)]
+    const pronostico = pronosticoSiguienteMes(historial)
+    const valor = pronostico.valor * (indices[m] ?? 1)
+    const margen = evaluacion.margen80 === null ? null : evaluacion.margen80 * Math.sqrt(i)
+    proyeccion.push({
+      periodo: p,
+      total: Math.max(valor, 0),
+      estimado: true,
+      minimo: margen === null ? null : Math.max(valor - margen, 0),
+      maximo: margen === null ? null : valor + margen,
+    })
   }
 
   return {
@@ -280,13 +441,14 @@ export function estimadores(gastos, serie, { horizonte = 3, hoy = new Date() } =
     r2,
     indices_estacionales: indices,
     proyeccion,
+    evaluacion,
     atipicos: atipicos(gastos),
   }
 }
 
 /** Punto de entrada: calcula todo el análisis de una vez. */
 export function analizar(gastos, me, opciones = {}) {
-  const ind = indicadores(gastos, me)
+  const ind = indicadores(gastos, me, opciones)
   if (!ind) return null
   return { indicadores: ind, estimadores: estimadores(gastos, ind.serie, opciones) }
 }
