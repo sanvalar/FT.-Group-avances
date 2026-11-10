@@ -166,6 +166,8 @@ mutation BloquearCuenta($id: ID!) {
 }
 ```
 
+Los errores de negocio GraphQL conservan mensajes seguros y exponen códigos estables en `errors[].extensions.code` (`FORBIDDEN`, `UNAUTHENTICATED`, `BAD_USER_INPUT`, `NOT_FOUND` o `CONFLICT`). Los fallos inesperados se registran en el servidor y se responden con un mensaje genérico, sin revelar consultas, credenciales ni detalles internos. El cliente convierte estos errores en errores de API para que las pantallas los muestren; no reemplaza fallos del backend por cambios simulados.
+
 Para crear o restablecer las cuentas de demostración ejecuta `npm run seed:roles` después de las migraciones. Este comando está bloqueado cuando `NODE_ENV=production`:
 
 | Rol | Correo | Contraseña |

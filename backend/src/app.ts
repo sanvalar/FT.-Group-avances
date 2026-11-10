@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { createHandler } from 'graphql-http/lib/use/express';
 import { graphqlSchema } from './infrastructure/config/graphqlSchema';
+import { formatGraphQLError } from './infrastructure/config/graphqlErrorFormatter';
 import authRoutes from './infrastructure/adapters/in/http/routes/authRoutes';
 import grupoRoutes from './infrastructure/adapters/in/http/routes/grupoRoutes';
 import reporteRoutes from './infrastructure/adapters/in/http/routes/reporteRoutes';
@@ -73,6 +74,7 @@ export function crearApp(): Application {
     autenticarOpcional,
     createHandler({
       schema: graphqlSchema,
+      formatError: formatGraphQLError,
       context: (req: any) => ({
         usuario: req.raw.usuario,
         headers: req.raw.headers,

@@ -181,6 +181,7 @@ describe('Integración · Seguridad', () => {
           expect(respuesta.body.errors).toBeUndefined();
         } else {
           expect(respuesta.body.errors?.[0]?.message).toContain('permisos');
+          expect(respuesta.body.errors?.[0]?.extensions?.code).toBe('FORBIDDEN');
         }
       }
     });
@@ -298,11 +299,13 @@ describe('Integración · Seguridad', () => {
         query: `query { finanzasUsuario(usuarioId: "${objetivo.id}") { usuario { id } } }`,
       });
       expect(consultaModerador.body.errors?.[0]?.message).toContain('permisos');
+      expect(consultaModerador.body.errors?.[0]?.extensions?.code).toBe('FORBIDDEN');
 
       const paginacionInvalida = await request(app).post('/graphql').set(bearer(supervisor)).send({
         query: `query { finanzasUsuario(usuarioId: "${objetivo.id}", limite: 101) { usuario { id } } }`,
       });
       expect(paginacionInvalida.body.errors?.[0]?.message).toContain('límite');
+      expect(paginacionInvalida.body.errors?.[0]?.extensions?.code).toBe('BAD_USER_INPUT');
     });
 
     it('GraphQL aplica reglas del servicio al cambiar estado y rol de cuentas', async () => {

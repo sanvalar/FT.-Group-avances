@@ -8,6 +8,7 @@ import {
   GraphQLNonNull,
   GraphQLID,
   GraphQLEnumType,
+  GraphQLError,
 } from 'graphql';
 import { administracionService, grupoGastoService, obtenerPerfilUseCase } from './container';
 
@@ -81,29 +82,39 @@ async function cargarGruposUsuario(usuarioId: number) {
 
 function exigirRoles(usuario: { rol: string } | undefined, ...roles: string[]): void {
   if (!usuario || !roles.includes(usuario.rol)) {
-    throw new Error('No tienes permisos para consultar este módulo.');
+    throw new GraphQLError('No tienes permisos para consultar este módulo.', {
+      extensions: { code: usuario ? 'FORBIDDEN' : 'UNAUTHENTICATED' },
+    });
   }
 }
 
 function parsearId(value: unknown, tipo: string): number {
   const id = Number(value);
   if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error(`Identificador de ${tipo} inválido.`);
+    throw new GraphQLError(`Identificador de ${tipo} inválido.`, {
+      extensions: { code: 'BAD_USER_INPUT' },
+    });
   }
   return id;
 }
 
 function exigirUsuario(context: { usuario?: GraphQLUsuario }): GraphQLUsuario {
-  if (!context?.usuario) throw new Error('No autenticado.');
+  if (!context?.usuario) {
+    throw new GraphQLError('No autenticado.', { extensions: { code: 'UNAUTHENTICATED' } });
+  }
   return context.usuario;
 }
 
 function validarPaginacion(limite: number, offset: number): void {
   if (!Number.isInteger(limite) || limite < 1 || limite > 100) {
-    throw new Error('El límite debe estar entre 1 y 100.');
+    throw new GraphQLError('El límite debe estar entre 1 y 100.', {
+      extensions: { code: 'BAD_USER_INPUT' },
+    });
   }
   if (!Number.isInteger(offset) || offset < 0 || offset > 1_000_000) {
-    throw new Error('El desplazamiento debe estar entre 0 y 1000000.');
+    throw new GraphQLError('El desplazamiento debe estar entre 0 y 1000000.', {
+      extensions: { code: 'BAD_USER_INPUT' },
+    });
   }
 }
 

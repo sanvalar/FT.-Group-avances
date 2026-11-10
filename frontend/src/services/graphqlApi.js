@@ -5,16 +5,39 @@ import { request, GRAPHQL_URL, ApiError } from './http.js';
  * Permite seleccionar campos especificos evitando el over-fetching.
  */
 export async function queryGraphQL(query, variables = {}) {
-  const respuesta = await request(GRAPHQL_URL, {
-    method: 'POST',
-    auth: true,
-    body: { query, variables },
-  });
+  let respuesta;
+  try {
+    respuesta = await request(GRAPHQL_URL, {
+      method: 'POST',
+      auth: true,
+      body: { query, variables },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+
+    console.error(JSON.stringify({
+      level: 'error',
+      type: 'graphql_request_failed',
+      errorName: error instanceof Error ? error.name : 'Error',
+    }));
+    throw new ApiError('No fue posible completar la solicitud GraphQL.', 0);
+  }
 
   if (respuesta?.errors && respuesta.errors.length > 0) {
+    const error = respuesta.errors[0];
+    const codigo = error?.extensions?.code;
+    const estados = {
+      UNAUTHENTICATED: 401,
+      FORBIDDEN: 403,
+      BAD_USER_INPUT: 400,
+      NOT_FOUND: 404,
+      CONFLICT: 409,
+      SERVICE_UNAVAILABLE: 503,
+      INTERNAL_SERVER_ERROR: 500,
+    };
     throw new ApiError(
-      respuesta.errors[0]?.message || 'Error en la consulta GraphQL',
-      400,
+      error?.message || 'Error en la consulta GraphQL',
+      estados[codigo] || 400,
       respuesta.errors,
     )
   }
