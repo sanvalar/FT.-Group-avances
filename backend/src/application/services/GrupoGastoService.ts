@@ -27,6 +27,14 @@ export class GrupoGastoService {
     return this.repository.listarGrupos(usuarioId);
   }
 
+  archivarGrupo(actorId: number, grupoId: number) {
+    return this.repository.archivarGrupo(actorId, grupoId);
+  }
+
+  listarGruposArchivados(usuarioId: number) {
+    return this.repository.listarGruposArchivados(usuarioId);
+  }
+
   listarIntegrantes(usuarioId: number, grupoId: number) {
     return this.repository.listarIntegrantes(usuarioId, grupoId);
   }

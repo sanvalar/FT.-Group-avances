@@ -21,6 +21,8 @@ export interface CrearGastoDatos {
 export interface GrupoGastoRepository {
   crearGrupo(usuarioId: number, nombre: string, descripcion?: string): Promise<GrupoResumen>;
   listarGrupos(usuarioId: number): Promise<GrupoResumen[]>;
+  archivarGrupo(actorId: number, grupoId: number): Promise<void>;
+  listarGruposArchivados(usuarioId: number): Promise<unknown[]>;
   listarIntegrantes(usuarioId: number, grupoId: number): Promise<unknown[]>;
   agregarMiembro(actorId: number, grupoId: number, usuarioId: number): Promise<void>;
   quitarMiembro(actorId: number, grupoId: number, usuarioId: number): Promise<void>;

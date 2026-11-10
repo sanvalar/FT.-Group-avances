@@ -27,7 +27,7 @@ export class PostgresAdministracionRepository implements AdministracionRepositor
     const activosPromise = this.poolActivos.query<FilaUsuarioAdministracion>(
       `SELECT id, nombre, email, estado, rol, fecha_registro 
        FROM usuario 
-       WHERE estado = 'activo'
+       WHERE estado IN ('activo', 'bloqueado')
        ORDER BY fecha_registro DESC, id DESC`,
     );
 
@@ -42,7 +42,7 @@ export class PostgresAdministracionRepository implements AdministracionRepositor
       `SELECT id, nombre, email, 'inactivo'::text AS estado, rol, fecha_registro
        FROM historico.usuario_inactivo
        ORDER BY fecha_registro DESC, id DESC`,
-    ).catch(() => ({ rows: [] }));
+    );
 
     const [resActivos, resInactivos] = await Promise.all([activosPromise, inactivosPromise]);
 
@@ -70,8 +70,7 @@ export class PostgresAdministracionRepository implements AdministracionRepositor
     }
 
     // Si no está activo, buscar en la base de datos de inactivos
-    try {
-      const resultadoInactivo = await this.poolHistorico.query<{
+    const resultadoInactivo = await this.poolHistorico.query<{
         id: number;
         nombre: string;
         email: string;
@@ -81,19 +80,16 @@ export class PostgresAdministracionRepository implements AdministracionRepositor
         `SELECT id, nombre, email, rol, fecha_registro FROM historico.usuario_inactivo WHERE id = $1 LIMIT 1`,
         [id],
       );
-      if (resultadoInactivo.rows[0]) {
-        const fila = resultadoInactivo.rows[0];
-        return {
-          id: fila.id,
-          nombre: fila.nombre,
-          email: fila.email,
-          estado: 'inactivo',
-          rol: fila.rol,
-          fechaRegistro: new Date(fila.fecha_registro),
-        };
-      }
-    } catch {
-      // Si la tabla no está creada aún o falla, devuelve null
+    if (resultadoInactivo.rows[0]) {
+      const fila = resultadoInactivo.rows[0];
+      return {
+        id: fila.id,
+        nombre: fila.nombre,
+        email: fila.email,
+        estado: 'inactivo',
+        rol: fila.rol,
+        fechaRegistro: new Date(fila.fecha_registro),
+      };
     }
 
     return null;
@@ -206,38 +202,28 @@ export class PostgresAdministracionRepository implements AdministracionRepositor
 
   async cambiarEstado(id: number, estado: EstadoUsuario): Promise<UsuarioAdministracion | null> {
     if (estado === 'inactivo') {
-      // ARCHIVADO: Mover de la base activa a la base inactiva
       const usuarioActivo = await this.buscarUsuario(id);
       if (!usuarioActivo) return null;
-
-      try {
-        await this.poolHistorico.query(
-          `INSERT INTO historico.usuario_inactivo (id, nombre, email, rol, fecha_registro)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (id) DO UPDATE SET fecha_desactivacion = NOW()`,
-          [usuarioActivo.id, usuarioActivo.nombre, usuarioActivo.email, usuarioActivo.rol, usuarioActivo.fechaRegistro],
-        );
-      } catch (err) {
-        console.error('Error al archivar en BD inactivos:', err);
-      }
-
+      await this.poolHistorico.query(
+        `INSERT INTO historico.usuario_inactivo (id, nombre, email, rol, fecha_registro)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (id) DO UPDATE SET fecha_desactivacion = NOW()`,
+        [usuarioActivo.id, usuarioActivo.nombre, usuarioActivo.email, usuarioActivo.rol, usuarioActivo.fechaRegistro],
+      );
       const res = await this.poolActivos.query<FilaUsuarioAdministracion>(
         `UPDATE usuario SET estado = 'inactivo' WHERE id = $1 RETURNING id, nombre, email, estado, rol, fecha_registro`,
         [id],
       );
       return res.rows[0] ? this.aUsuario(res.rows[0]) : null;
-    } else {
-      // REACTIVACIÓN: Retirar de base inactiva y habilitar en base activa
-      try {
-        await this.poolHistorico.query(`DELETE FROM historico.usuario_inactivo WHERE id = $1`, [id]);
-      } catch {}
-
-      const res = await this.poolActivos.query<FilaUsuarioAdministracion>(
-        `UPDATE usuario SET estado = 'activo' WHERE id = $1 RETURNING id, nombre, email, estado, rol, fecha_registro`,
-        [id],
-      );
-      return res.rows[0] ? this.aUsuario(res.rows[0]) : null;
     }
+
+    const res = await this.poolActivos.query<FilaUsuarioAdministracion>(
+      `UPDATE usuario SET estado = $1 WHERE id = $2 RETURNING id, nombre, email, estado, rol, fecha_registro`,
+      [estado, id],
+    );
+    if (!res.rows[0]) return null;
+    await this.poolHistorico.query(`DELETE FROM historico.usuario_inactivo WHERE id = $1`, [id]);
+    return this.aUsuario(res.rows[0]);
   }
 
   async cambiarRol(id: number, rol: RolUsuario): Promise<UsuarioAdministracion | null> {

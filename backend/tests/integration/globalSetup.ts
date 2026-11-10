@@ -29,7 +29,7 @@ export default async function globalSetup(): Promise<void> {
   const cliente = new Client({ ...conexion, database: nombreBd });
   await cliente.connect();
   try {
-    await cliente.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await cliente.query('DROP SCHEMA IF EXISTS historico CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     const carpeta = path.join(__dirname, '..', '..', 'db', 'migrations');
     for (const archivo of fs.readdirSync(carpeta).filter((a) => a.endsWith('.sql')).sort()) {
       await cliente.query(fs.readFileSync(path.join(carpeta, archivo), 'utf-8'));

@@ -1,7 +1,7 @@
 // Módulos financieros: grupos, gastos, balances, historial y recibos.
 //
-// Modo "api" (por defecto): todo se guarda en PostgreSQL a través del
-// backend (/api/grupos, /api/gastos, /api/balances, /api/panel, /api/historial).
+// Modo "api" (por defecto): los datos viven en PostgreSQL. El panel y los
+// grupos se consultan por GraphQL; las escrituras y operaciones restantes usan REST.
 //
 // Modo "local" (VITE_FINANCE_MODE=local): demostración sin backend; guarda
 // los datos en el navegador con la misma estructura de tablas.
@@ -12,6 +12,7 @@ import { today } from '../utils/format'
 import { arrayFromResponse } from '../utils/apiResponse'
 import { usesLocalFinance as shouldUseLocalFinance } from '../utils/demoAccount'
 import { auditoriaApi } from './auditoriaApi'
+import { graphqlApi } from './graphqlApi'
 
 const MODE = import.meta.env.VITE_FINANCE_MODE || 'api'
 const delay = (ms = 150) => new Promise(r => setTimeout(r, ms))
@@ -303,11 +304,8 @@ const local = {
 /* ------------------------------------------------------------------ */
 const remote = {
   // Las respuestas del backend usan los mismos nombres de campos que el modo local.
-  summary: () => request('/panel/resumen', { auth: true }),
-  async groups() {
-    const response = await request('/grupos', { auth: true })
-    return arrayFromResponse(response, ['grupos'], '/grupos')
-  },
+  summary: () => graphqlApi.obtenerMiPanel(),
+  groups: () => graphqlApi.obtenerMisGrupos(),
   createGroup: (_u, body) => request('/grupos', { method: 'POST', auth: true, body }),
   addMember: (_u, id, email) => request(`/grupos/${id}/miembros`, { method: 'POST', auth: true, body: { email } }),
   async history() {

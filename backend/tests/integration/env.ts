@@ -44,6 +44,7 @@ for (const [clave, valor] of Object.entries(valores)) {
 // Se deja vacia (no se borra) para que dotenv no la tome del .env: si
 // existiera, la app se conectaria a la base de desarrollo en vez de la de pruebas.
 process.env.DATABASE_URL = '';
+process.env.DATABASE_URL_HISTORICO = '';
 process.env.DATABASE_SSL = 'false';
 
 // La IA nunca se llama de verdad: ia.integration.ts inyecta un extractor

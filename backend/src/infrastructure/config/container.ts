@@ -67,12 +67,12 @@ export const actualizarPerfilUseCase = new ActualizarPerfilUseCaseImpl(usuarioRe
 export const desactivarCuentaUseCase = new DesactivarCuentaUseCaseImpl(usuarioRepository, refreshTokenRepository);
 export const activarCuentaUseCase = new ActivarCuentaUseCaseImpl(usuarioRepository);
 
-const grupoGastoRepository = new PostgresGrupoGastoRepository(pool);
-const grupoGastoService = new GrupoGastoService(grupoGastoRepository);
+const grupoGastoRepository = new PostgresGrupoGastoRepository(pool, poolHistorico);
+export const grupoGastoService = new GrupoGastoService(grupoGastoRepository);
 export const grupoGastoController = new GrupoGastoController(grupoGastoService);
 
 const administracionRepository = new PostgresAdministracionRepository(pool, poolHistorico);
-const administracionService = new AdministracionService(administracionRepository);
+export const administracionService = new AdministracionService(administracionRepository);
 export const administracionController = new AdministracionController(administracionService);
 
 const auditoriaRepository = new PostgresAuditoriaRepository(pool);

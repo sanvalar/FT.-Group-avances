@@ -16,7 +16,8 @@ export interface RequestAutenticado extends Request {
 
 export function auditarActividad(req: RequestAutenticado, res: Response, next: NextFunction): void {
   const rutaOriginal = req.path;
-  if (!rutaOriginal.startsWith('/api/')) {
+  const esGraphQL = rutaOriginal === '/graphql';
+  if (!rutaOriginal.startsWith('/api/') && !esGraphQL) {
     next();
     return;
   }
@@ -46,7 +47,9 @@ export function auditarActividad(req: RequestAutenticado, res: Response, next: N
       }
       if (!usuario) return;
 
-      const ruta = `${req.baseUrl}${req.route?.path ?? req.path}`.slice(0, 255);
+      const ruta = esGraphQL
+        ? '/graphql'
+        : `${req.baseUrl}${req.route?.path ?? req.path}`.slice(0, 255);
       const solicitudId = res.locals.requestId;
       await auditoriaService.registrar({
         actorId: usuario.id,

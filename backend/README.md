@@ -140,6 +140,32 @@ Los cambios no permiten gestionar la propia cuenta desde administración. La aut
 
 Los módulos financieros (`/api/grupos`, reportes, notificaciones, escaneo IA, contratos y educación personal) y las consultas de grupos en GraphQL son exclusivos del rol `usuario`. Los supervisores acceden a la consulta financiera de solo lectura y moderadores a soporte y estadísticas educativas agregadas; ambos accesos se validan en el backend.
 
+### GraphQL
+
+El endpoint es `POST /graphql` y utiliza el mismo token Bearer que la API REST. Las consultas `misGrupos` y `miPanel` entregan al usuario autenticado sus grupos, miembros, gastos agregados y balances; no aceptan un ID de usuario proporcionado por el cliente. `usuarios` permite listar y filtrar cuentas a moderadores y supervisores. `finanzasUsuario(usuarioId, limite, offset)` está reservado al supervisor y reutiliza el servicio de supervisión de solo lectura. `yo` devuelve el perfil autenticado y `gruposArchivados` solo los grupos archivados por la cuenta actual. Las mutaciones `cambiarEstadoUsuario` y `cambiarRolUsuario` reutilizan las reglas del servicio de administración; los alias `desactivarUsuario` y `archivarGrupo` también aplican esas reglas y controles de pertenencia. El frontend consume GraphQL en paneles, grupos, administración y supervisión. Las demás operaciones de escritura financiera, soporte y educación siguen en REST sin duplicar endpoints ni reglas de negocio.
+
+Ejemplo de consulta autenticada:
+
+```graphql
+query MiPanel {
+  miPanel {
+    balance
+    grupos { id nombre totalGastos miBalance }
+    liquidaciones { grupo de para monto }
+  }
+}
+```
+
+Ejemplo de mutación administrativa (moderador o supervisor, sujeto a las reglas de rol):
+
+```graphql
+mutation BloquearCuenta($id: ID!) {
+  cambiarEstadoUsuario(usuarioId: $id, estado: bloqueado) {
+    id nombre estado
+  }
+}
+```
+
 Para crear o restablecer las cuentas de demostración ejecuta `npm run seed:roles` después de las migraciones. Este comando está bloqueado cuando `NODE_ENV=production`:
 
 | Rol | Correo | Contraseña |

@@ -1,5 +1,4 @@
-import { request } from './http'
-import { arrayFromResponse } from '../utils/apiResponse'
+import { graphqlApi } from './graphqlApi'
 
 const DEMO_USUARIOS = [
   { id: 1, nombre: 'Supervisor de prueba', email: 'supervisor@ftgroup.test', rol: 'supervisor', estado: 'activo', fechaRegistro: '2026-08-01T10:00:00.000Z' },
@@ -12,8 +11,7 @@ const DEMO_USUARIOS = [
 export const adminApi = {
   async users() {
     try {
-      const data = await request('/administracion/usuarios', { auth: true })
-      return arrayFromResponse(data, ['usuarios'], '/administracion/usuarios')
+      return await graphqlApi.obtenerUsuarios()
     } catch (err) {
       if (err.status === 0 || err.status === 404 || err.status === 502) {
         return DEMO_USUARIOS
@@ -23,28 +21,10 @@ export const adminApi = {
   },
 
   async changeStatus(id, estado) {
-    try {
-      const data = await request(`/administracion/usuarios/${id}/estado`, {
-        method: 'PATCH',
-        auth: true,
-        body: { estado },
-      })
-      return data.usuario
-    } catch {
-      return { id, estado }
-    }
+    return graphqlApi.cambiarEstadoUsuario(id, estado)
   },
 
   async changeRole(id, rol) {
-    try {
-      const data = await request(`/administracion/usuarios/${id}/rol`, {
-        method: 'PATCH',
-        auth: true,
-        body: { rol },
-      })
-      return data.usuario
-    } catch {
-      return { id, rol }
-    }
+    return graphqlApi.cambiarRolUsuario(id, rol)
   },
 }

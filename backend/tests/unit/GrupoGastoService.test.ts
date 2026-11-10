@@ -8,6 +8,8 @@ describe('GrupoGastoService', () => {
     return {
       crearGrupo: jest.fn(),
       listarGrupos: jest.fn(),
+      archivarGrupo: jest.fn(),
+      listarGruposArchivados: jest.fn(),
       listarIntegrantes: jest.fn(),
       agregarMiembro: jest.fn(),
       quitarMiembro: jest.fn(),

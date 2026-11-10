@@ -2,6 +2,10 @@
 // intenta renovar la sesión una vez con /auth/refresh antes de fallar.
 
 export const API_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || 'http://localhost:3000/api'
+const API_BASE_URL = API_URL.replace(/\/+$/, '')
+export const GRAPHQL_URL = API_BASE_URL.endsWith('/api')
+  ? `${API_BASE_URL.slice(0, -4)}/graphql`
+  : `${API_BASE_URL}/graphql`
 
 const KEYS = { access: 'ft_access_token', refresh: 'ft_refresh_token' }
 
@@ -39,7 +43,8 @@ async function rawRequest(path, { method = 'GET', body, auth = false, timeout = 
   const timer = setTimeout(() => controller.abort(), timeout)
   let response
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    const url = /^https?:\/\//i.test(path) ? path : `${API_URL}${path}`
+    response = await fetch(url, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,

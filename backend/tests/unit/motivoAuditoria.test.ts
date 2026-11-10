@@ -6,6 +6,8 @@ describe('motivo de auditoría', () => {
       .toBe('Comprobar la disponibilidad de la API y la base de datos.');
     expect(motivoSolicitudAuditoria('GET', '/api/auditoria'))
       .toBe('Consultar la bitácora para supervisar la actividad.');
+    expect(motivoSolicitudAuditoria('POST', '/graphql'))
+      .toBe('Ejecutar una consulta o mutación GraphQL autorizada.');
   });
 
   it('describe el motivo usando el tipo de operación y el recurso', () => {

@@ -11,7 +11,7 @@ import {
 import { CrearGastoDatos, GrupoGastoRepository, GrupoResumen } from '../../../../../domain/ports/out/GrupoGastoRepository';
 
 export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool, private readonly poolHistorico: Pool) {}
 
   async crearGrupo(usuarioId: number, nombre: string, descripcion?: string): Promise<GrupoResumen> {
     return this.enTransaccion(async (client) => {
@@ -58,6 +58,42 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
       miembrosActivos: fila.miembros_activos,
       fechaCreacion: fila.fecha_creacion,
     }));
+  }
+
+  async archivarGrupo(actorId: number, grupoId: number): Promise<void> {
+    await this.enTransaccion(async (client) => {
+      const resultado = await client.query(
+        `SELECT g.id, g.nombre, g.descripcion, g.creado_por, g.fecha_creacion
+         FROM grupo g
+         JOIN miembro_grupo m ON m.grupo_id = g.id
+         WHERE g.id = $1 AND g.estado = 'activo' AND m.usuario_id = $2
+           AND m.estado = 'activo' AND m.rol = 'administrador'
+         FOR UPDATE OF g`,
+        [grupoId, actorId],
+      );
+      if (resultado.rowCount === 0) {
+        throw new AccesoDenegadoError('No tienes permiso: solo un administrador activo del grupo puede archivarlo.');
+      }
+
+      const grupo = resultado.rows[0];
+      await this.poolHistorico.query(
+        `INSERT INTO historico.grupo_archivado (id, nombre, descripcion, creado_por, fecha_creacion)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (id) DO NOTHING`,
+        [grupo.id, grupo.nombre, grupo.descripcion, grupo.creado_por, grupo.fecha_creacion],
+      );
+      await client.query(`UPDATE grupo SET estado = 'archivado' WHERE id = $1`, [grupoId]);
+    });
+  }
+
+  listarGruposArchivados(usuarioId: number): Promise<unknown[]> {
+    return this.poolHistorico.query(
+      `SELECT id, nombre, descripcion, 'archivado' AS estado, fecha_creacion AS "fechaCreacion"
+       FROM historico.grupo_archivado
+       WHERE creado_por = $1
+       ORDER BY fecha_creacion DESC, id DESC`,
+      [usuarioId],
+    ).then((resultado) => resultado.rows);
   }
 
   async agregarMiembro(actorId: number, grupoId: number, usuarioId: number): Promise<void> {

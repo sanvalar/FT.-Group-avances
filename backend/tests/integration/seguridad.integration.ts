@@ -185,6 +185,151 @@ describe('Integración · Seguridad', () => {
       }
     });
 
+    it('GraphQL entrega al usuario autenticado el panel y grupos detallados', async () => {
+      const cliente = await crearSesion(app, 'Usuario GraphQL');
+      const creado = await request(app).post('/api/grupos').set(bearer(cliente)).send({ nombre: 'Grupo GraphQL' });
+      expect(creado.status).toBe(201);
+      const grupoId = creado.body.grupo.id;
+      const gasto = await request(app).post(`/api/grupos/${grupoId}/gastos`).set(bearer(cliente)).send({
+        descripcion: 'Gasto consultado con GraphQL',
+        montoTotal: 12500,
+        fechaGasto: '2026-11-09',
+        categoria: 'alimentacion',
+        tipoDivision: 'equitativa',
+        usuarioIds: [cliente.id],
+      });
+      expect(gasto.status).toBe(201);
+
+      const respuesta = await request(app).post('/graphql').set(bearer(cliente)).send({
+        query: `{
+          yo { id email }
+          misGrupos { id nombre totalGastos numGastos miBalance miembros { id nombre } }
+          miPanel { teDeben debes balance grupos { id } liquidaciones { grupo_id monto } }
+        }`,
+      });
+      expect(respuesta.body.errors).toBeUndefined();
+      expect(respuesta.body.data.yo).toEqual({ id: String(cliente.id), email: cliente.email });
+      expect(respuesta.body.data.misGrupos).toEqual([
+        expect.objectContaining({
+          id: String(grupoId),
+          nombre: 'Grupo GraphQL',
+          totalGastos: 12500,
+          numGastos: 1,
+          miBalance: 0,
+          miembros: [expect.objectContaining({ id: String(cliente.id) })],
+        }),
+      ]);
+      expect(respuesta.body.data.miPanel).toMatchObject({
+        teDeben: 0,
+        debes: 0,
+        balance: 0,
+      });
+    });
+
+    it('GraphQL solo permite archivar a un administrador activo del grupo', async () => {
+      const propietario = await crearSesion(app, 'Propietario de grupo');
+      const creado = await request(app).post('/api/grupos').set(bearer(propietario)).send({ nombre: 'Grupo protegido' });
+      expect(creado.status).toBe(201);
+      const grupoId = creado.body.grupo.id;
+      const externo = await crearSesion(app, 'Usuario externo');
+
+      const denegado = await request(app).post('/graphql').set(bearer(externo)).send({
+        query: `mutation { archivarGrupo(grupoId: "${grupoId}") }`,
+      });
+      expect(denegado.body.errors?.[0]?.message).toContain('permiso');
+      const estado = await pool.query('SELECT estado FROM grupo WHERE id = $1', [grupoId]);
+      expect(estado.rows[0].estado).toBe('activo');
+
+      const archivado = await request(app).post('/graphql').set(bearer(propietario)).send({
+        query: `mutation { archivarGrupo(grupoId: "${grupoId}") }`,
+      });
+      expect(archivado.body.errors).toBeUndefined();
+      expect(archivado.body.data.archivarGrupo).toContain('archivado');
+      const archivadoEnBase = await pool.query(
+        'SELECT id, creado_por FROM historico.grupo_archivado WHERE id = $1',
+        [grupoId],
+      );
+      expect(archivadoEnBase.rows).toEqual([{ id: Number(grupoId), creado_por: propietario.id }]);
+      const archivados = await request(app).post('/graphql').set(bearer(propietario)).send({
+        query: '{ gruposArchivados { id nombre estado } }',
+      });
+      expect(archivados.body.errors).toBeUndefined();
+      expect(archivados.body.data.gruposArchivados).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: String(grupoId), estado: 'archivado' }),
+      ]));
+    });
+
+    it('GraphQL protege consultas administrativas y limita finanzas a supervisores', async () => {
+      const objetivo = await crearSesion(app, 'Cuenta supervisada GraphQL');
+      const listaSupervisor = await request(app).post('/graphql').set(bearer(supervisor)).send({
+        query: '{ usuarios { id nombre email rol estado } }',
+      });
+      expect(listaSupervisor.body.errors).toBeUndefined();
+      expect(listaSupervisor.body.data.usuarios).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: String(objetivo.id), estado: 'activo' }),
+      ]));
+
+      const listaUsuario = await request(app).post('/graphql').set(bearer(usuario)).send({
+        query: '{ usuarios { id } }',
+      });
+      expect(listaUsuario.body.errors?.[0]?.message).toContain('permisos');
+
+      const consultaSupervisor = await request(app).post('/graphql').set(bearer(supervisor)).send({
+        query: `query {
+          finanzasUsuario(usuarioId: "${objetivo.id}", limite: 10, offset: 0) {
+            usuario { id email }
+            resumen { grupos gastos montoPagado }
+            grupos { id nombre }
+            gastos { id }
+            paginacion { limite offset total }
+          }
+        }`,
+      });
+      expect(consultaSupervisor.body.errors).toBeUndefined();
+      expect(consultaSupervisor.body.data.finanzasUsuario).toMatchObject({
+        usuario: { id: String(objetivo.id), email: objetivo.email },
+        resumen: { grupos: 0, gastos: 0 },
+        grupos: [],
+        gastos: [],
+        paginacion: { limite: 10, offset: 0, total: 0 },
+      });
+
+      const consultaModerador = await request(app).post('/graphql').set(bearer(moderador)).send({
+        query: `query { finanzasUsuario(usuarioId: "${objetivo.id}") { usuario { id } } }`,
+      });
+      expect(consultaModerador.body.errors?.[0]?.message).toContain('permisos');
+
+      const paginacionInvalida = await request(app).post('/graphql').set(bearer(supervisor)).send({
+        query: `query { finanzasUsuario(usuarioId: "${objetivo.id}", limite: 101) { usuario { id } } }`,
+      });
+      expect(paginacionInvalida.body.errors?.[0]?.message).toContain('límite');
+    });
+
+    it('GraphQL aplica reglas del servicio al cambiar estado y rol de cuentas', async () => {
+      const cuenta = await crearSesion(app, 'Cuenta administrada GraphQL');
+      const bloqueada = await request(app).post('/graphql').set(bearer(moderador)).send({
+        query: `mutation {
+          cambiarEstadoUsuario(usuarioId: "${cuenta.id}", estado: bloqueado) {
+            id estado
+          }
+        }`,
+      });
+      expect(bloqueada.body.errors).toBeUndefined();
+      expect(bloqueada.body.data.cambiarEstadoUsuario).toEqual({ id: String(cuenta.id), estado: 'bloqueado' });
+      expect((await request(app).get('/api/auth/me').set(bearer(cuenta))).status).toBe(401);
+
+      const rolDenegado = await request(app).post('/graphql').set(bearer(moderador)).send({
+        query: `mutation { cambiarRolUsuario(usuarioId: "${cuenta.id}", rol: moderador) { id rol } }`,
+      });
+      expect(rolDenegado.body.errors?.[0]?.message).toContain('permisos');
+
+      const rolActualizado = await request(app).post('/graphql').set(bearer(supervisor)).send({
+        query: `mutation { cambiarRolUsuario(usuarioId: "${cuenta.id}", rol: moderador) { id rol } }`,
+      });
+      expect(rolActualizado.body.errors).toBeUndefined();
+      expect(rolActualizado.body.data.cambiarRolUsuario).toEqual({ id: String(cuenta.id), rol: 'moderador' });
+    });
+
     it('solo el supervisor cambia roles; nadie puede cambiar su propio rol', async () => {
       const objetivo = await crearSesion(app, 'Objetivo');
       expect((await request(app).patch(`/api/administracion/usuarios/${objetivo.id}/rol`).set(bearer(moderador)).send({ rol: 'moderador' })).status).toBe(403);
