@@ -1,0 +1,63 @@
+{
+  "name": "ft-group-backend",
+  "version": "1.0.0",
+  "description": "FT. GROUP - Backend (Arquitectura Hexagonal) - Modulo de Usuarios / Autenticacion",
+  "main": "dist/server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "migrate": "node dist/infrastructure/config/runMigrations.js",
+    "migrate:dev": "ts-node src/infrastructure/config/runMigrations.ts",
+    "seed:roles": "node scripts/seed-roles.js",
+    "micro:auth": "ts-node-dev --respawn --transpile-only src/microservices/authServer.ts",
+    "micro:expenses": "ts-node-dev --respawn --transpile-only src/microservices/expensesServer.ts",
+    "micro:reports": "ts-node-dev --respawn --transpile-only src/microservices/reportsServer.ts",
+    "micro:notifications": "ts-node-dev --respawn --transpile-only src/microservices/notificationsServer.ts",
+    "test": "jest --runInBand",
+    "test:integration": "jest -c jest.integration.config.js --runInBand",
+    "test:all": "npm test && npm run test:integration",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "hexagonal-architecture",
+    "ports-and-adapters",
+    "express",
+    "typescript"
+  ],
+  "author": "FT. GROUP - Grupo 2 - Universidad de San Buenaventura",
+  "license": "MIT",
+  "dependencies": {
+    "argon2": "^0.45.1",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "graphql": "^17.0.2",
+    "graphql-http": "^1.23.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "pg": "^8.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^20.14.2",
+    "@types/pg": "^8.11.6",
+    "@types/supertest": "^6.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.1.5",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
+  }
+}

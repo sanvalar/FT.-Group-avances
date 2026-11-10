@@ -1,0 +1,15 @@
+# Dependencias y compilados (frontend/ y backend/)
+node_modules/
+dist/
+coverage/
+
+# Variables de entorno: cada carpeta tiene su .env.example
+.env
+.env.local
+
+# Sistema y editores
+*.log
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json

@@ -1,0 +1,159 @@
+version: "3.8"
+
+services:
+  # 1. Base de datos PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: ft_group_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ft_group
+    ports:
+      - "5432:5432"
+    volumes:
+      - ft_group_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ft_network
+
+  # 2. API Gateway (Punto de entrada único)
+  api-gateway:
+    build:
+      context: ./microservices/api-gateway
+      dockerfile: Dockerfile
+    container_name: ft_group_gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "3000:8080"
+    environment:
+      PORT: 8080
+      CORS_ORIGIN: "http://localhost:5173"
+      AUTH_SERVICE_URL: "http://auth-service:3001"
+      EXPENSES_SERVICE_URL: "http://expenses-service:3002"
+      REPORTS_SERVICE_URL: "http://reports-service:3003"
+      NOTIFICATIONS_SERVICE_URL: "http://notifications-service:3004"
+    depends_on:
+      - auth-service
+      - expenses-service
+      - reports-service
+      - notifications-service
+    networks:
+      - ft_network
+
+  # 3. Microservicio: Autenticación, Usuarios y Administración
+  auth-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.auth
+    container_name: ft_group_auth_service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: ft_group
+      JWT_SECRET: cambia-este-secreto-en-produccion
+      JWT_EXPIRATION: 15m
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ft_network
+
+  # 4. Microservicio: Grupos, Gastos y Balances
+  expenses-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.expenses
+    container_name: ft_group_expenses_service
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: ft_group
+      JWT_SECRET: cambia-este-secreto-en-produccion
+      JWT_EXPIRATION: 15m
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ft_network
+
+  # 5. Microservicio: Reportes y Análisis
+  reports-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.reports
+    container_name: ft_group_reports_service
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: ft_group
+      JWT_SECRET: cambia-este-secreto-en-produccion
+      JWT_EXPIRATION: 15m
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ft_network
+
+  # 6. Microservicio: Notificaciones
+  notifications-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.notifications
+    container_name: ft_group_notifications_service
+    restart: unless-stopped
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: 3004
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: ft_group
+      JWT_SECRET: cambia-este-secreto-en-produccion
+      JWT_EXPIRATION: 15m
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ft_network
+
+volumes:
+  ft_group_pgdata:
+
+networks:
+  ft_network:
+    driver: bridge
