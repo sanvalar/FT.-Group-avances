@@ -22,23 +22,30 @@ export default function Profile({ user, setUser, onLogout }) {
     e.preventDefault(); setSaving(true); setMsg({ text: '' })
     try {
       const u = await authApi.updateProfile({ nombre: form.nombre.trim(), telefono: form.telefono.trim() || null })
-      setUser(u); setMsg({ type: 'success', text: 'Perfil actualizado correctamente.' })
+      setUser(u); setMsg({ type: 'success', text: t('profile_updated') })
     } catch (err) { setMsg({ type: 'error', text: err.message }) } finally { setSaving(false) }
   }
 
   const deactivate = async () => {
-    if (!window.confirm('¿Seguro que deseas desactivar tu cuenta? Se cerrarán todas tus sesiones y no podrás iniciar sesión hasta reactivarla.')) return
+    if (!window.confirm(t('deactivate_confirm'))) return
     try { await authApi.deactivate(); await onLogout() } catch (err) { setMsg({ type: 'error', text: err.message }) }
   }
 
   const resetData = async empty => {
-    const txt = empty ? '¿Borrar todos los grupos y gastos guardados en este navegador?' : '¿Restaurar los datos de demostración?'
+    const txt = empty ? t('demo_empty_confirm') : t('demo_restore_confirm')
     if (!window.confirm(txt)) return
     await financeApi.resetDemo(user, { empty })
-    setMsg({ type: 'success', text: empty ? 'Datos borrados. Empiezas desde cero.' : 'Datos de demostración restaurados.' })
+    setMsg({ type: 'success', text: empty ? t('demo_cleared_msg') : t('demo_restored_msg') })
   }
 
-  const dateLocale = lang === 'en' ? 'en-US' : (lang === 'pt' ? 'pt-BR' : 'es-CO')
+  const dateLocale = {
+    es: 'es-CO',
+    en: 'en-US',
+    pt: 'pt-BR',
+    fr: 'fr-FR',
+    de: 'de-DE',
+    it: 'it-IT',
+  }[lang] || 'es-CO'
   const registrado = user.fechaRegistro
     ? new Date(user.fechaRegistro).toLocaleDateString(dateLocale, { day: 'numeric', month: 'long', year: 'numeric' })
     : null
@@ -47,7 +54,7 @@ export default function Profile({ user, setUser, onLogout }) {
 
   return (
     <>
-      <PageHeader title="Mi perfil" subtitle="Consulta y actualiza tus datos personales." />
+      <PageHeader title={t('profile_title')} subtitle={t('profile_subtitle')} />
       <Alert type={msg.type}>{msg.text}</Alert>
       <div className="profile-grid">
         <section className="card">
@@ -60,27 +67,27 @@ export default function Profile({ user, setUser, onLogout }) {
           </div>
           <form className="form" onSubmit={save}>
             <div className="field">
-              <label htmlFor="p-nombre">Nombre</label>
+              <label htmlFor="p-nombre">{t('field_fullname')}</label>
               <input id="p-nombre" name="nombre" value={form.nombre} onChange={change} minLength={2} maxLength={120} required />
             </div>
             <div className="field">
-              <label htmlFor="p-email">Correo</label>
+              <label htmlFor="p-email">{t('field_email')}</label>
               <input id="p-email" value={user.email} disabled />
             </div>
             <div className="field">
-              <label htmlFor="p-tel">Teléfono</label>
+              <label htmlFor="p-tel">{t('field_phone')}</label>
               <input id="p-tel" name="telefono" type="tel" value={form.telefono} onChange={change} maxLength={20} />
             </div>
-            <button className="btn btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}</button>
+            <button className="btn btn-primary" disabled={saving}>{saving ? t('saving') : t('save_changes')}</button>
           </form>
         </section>
 
         <div className="stack">
           {/* Theme Settings */}
           <section className="card">
-            <h2 className="card-title">Apariencia y tema</h2>
+            <h2 className="card-title">{t('theme')}</h2>
             <p className="muted small" style={{ marginBottom: '14px' }}>
-              Elige entre Modo Oscuro y Modo Vivo con alto contraste o sincronización automática con el sistema.
+              {t('theme_description')}
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <button
@@ -88,14 +95,14 @@ export default function Profile({ user, setUser, onLogout }) {
                 className={`theme-pick-card ${!isVivid ? 'active' : ''}`}
                 onClick={() => isVivid && toggleTheme()}
               >
-                <span>🌙 Modo Oscuro</span>
+                <span>🌙 {t('theme_dark')}</span>
               </button>
               <button
                 type="button"
                 className={`theme-pick-card ${isVivid ? 'active' : ''}`}
                 onClick={() => !isVivid && toggleTheme()}
               >
-                <span>☀️ Modo Vivo</span>
+                <span>☀️ {t('theme_vivid')}</span>
               </button>
             </div>
           </section>
@@ -103,7 +110,7 @@ export default function Profile({ user, setUser, onLogout }) {
           {/* Currency Settings */}
           <section className="card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-              <h2 className="card-title">Divisa y conversión en tiempo real</h2>
+              <h2 className="card-title">{t('currency')}</h2>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -112,11 +119,11 @@ export default function Profile({ user, setUser, onLogout }) {
                 style={{ padding: '4px 8px', fontSize: '12px' }}
               >
                 <Icon name="refresh" size={13} className={loadingRates ? 'spin' : ''} />
-                <span>{loadingRates ? 'Sincronizando...' : 'Actualizar tasas'}</span>
+                <span>{loadingRates ? t('syncing_rates') : t('refresh_rates')}</span>
               </button>
             </div>
             <p className="muted small" style={{ marginBottom: '14px' }}>
-              Selecciona tu moneda de preferencia; todos los saldos y gastos se recalculan automáticamente.
+              {t('currency_hint')}
             </p>
             <div className="field">
               <select
@@ -135,15 +142,15 @@ export default function Profile({ user, setUser, onLogout }) {
             {currency !== 'COP' && (
               <div className="rate-info-box" style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '10px', background: 'var(--surface-2)', border: '1px solid var(--line-2)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span className="small muted">Tasa de cambio sincronizada:</span>
-                  <span className="badge-ia" style={{ fontSize: '11px' }}>En vivo</span>
+                  <span className="small muted">{t('live_rate')}:</span>
+                  <span className="badge-ia" style={{ fontSize: '11px' }}>{t('live_rate')}</span>
                 </div>
                 <div style={{ fontSize: '15px', fontWeight: '700', marginTop: '4px', color: 'var(--accent-hi)' }}>
                   1 {currency} ≈ ${copPerUnit.toLocaleString()} COP
                 </div>
                 {lastUpdated && (
                   <div className="small muted" style={{ marginTop: '4px', fontSize: '11px' }}>
-                    Última sincronización: {new Date(lastUpdated).toLocaleTimeString()}
+                    {t('last_sync')}: {new Date(lastUpdated).toLocaleTimeString(dateLocale)}
                   </div>
                 )}
               </div>
@@ -152,39 +159,39 @@ export default function Profile({ user, setUser, onLogout }) {
 
           {/* Language Settings */}
           <section className="card">
-            <h2 className="card-title">Idioma</h2>
+            <h2 className="card-title">{t('language')}</h2>
             <p className="muted small" style={{ marginBottom: '14px' }}>
-              Detectado automáticamente según el sistema del dispositivo.
+              {t('language_hint')}
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <LanguageSwitch />
             </div>
             <div className="small muted" style={{ marginTop: '10px' }}>
-              Idioma detectado del dispositivo: <strong style={{ textTransform: 'uppercase', color: 'var(--text)' }}>{deviceLang}</strong>
+              {t('device_language')}: <strong style={{ textTransform: 'uppercase', color: 'var(--text)' }}>{deviceLang}</strong>
             </div>
           </section>
 
           {/* Account Section */}
           <section className="card">
-            <h2 className="card-title">Cuenta</h2>
+            <h2 className="card-title">{t('account_section')}</h2>
             <dl className="dl">
-              <dt>Estado</dt><dd><span className={`pill ${user.estado === 'activo' ? 'pill-ok' : ''}`}>{user.estado}</span></dd>
-              <dt>Rol</dt><dd>{user.rol || 'usuario'}</dd>
-              {registrado && <><dt>Miembro desde</dt><dd>{registrado}</dd></>}
+              <dt>{t('account_status')}</dt><dd><span className={`pill ${user.estado === 'activo' ? 'pill-ok' : ''}`}>{user.estado === 'activo' ? t('active') : t('inactive')}</span></dd>
+              <dt>{t('account_role')}</dt><dd>{user.rol || t('user_role')}</dd>
+              {registrado && <><dt>{t('account_member_since')}</dt><dd>{registrado}</dd></>}
             </dl>
             <div className="btn-row">
-              <button className="btn btn-ghost" onClick={onLogout}><Icon name="logout" size={16} />Cerrar sesión</button>
-              <button className="btn btn-danger-ghost" onClick={deactivate}>Desactivar cuenta</button>
+              <button className="btn btn-ghost" onClick={onLogout}><Icon name="logout" size={16} />{t('nav_logout')}</button>
+              <button className="btn btn-danger-ghost" onClick={deactivate}>{t('deactivate_account')}</button>
             </div>
           </section>
 
           {usesLocalFinance(user) && (
             <section className="card">
-              <h2 className="card-title">Datos de grupos y gastos</h2>
-              <p className="muted small">Los datos de ejemplo se guardan solo en este navegador y no modifican el backend.</p>
+              <h2 className="card-title">{t('demo_section_title')}</h2>
+              <p className="muted small">{t('demo_section_desc')}</p>
               <div className="btn-row">
-                <button className="btn btn-ghost btn-sm" onClick={() => resetData(false)}>Restaurar demostración</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => resetData(true)}>Empezar vacío</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => resetData(false)}>{t('demo_reset_btn')}</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => resetData(true)}>{t('demo_empty_btn')}</button>
               </div>
             </section>
           )}

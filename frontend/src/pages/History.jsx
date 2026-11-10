@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { financeApi } from '../services/financeApi'
 import { useData } from '../utils/useData'
-import { CATEGORIAS, categoria, money, monthLabel } from '../utils/format'
+import { CATEGORIAS, categoria, money } from '../utils/format'
 import { splitEqual } from '../utils/balances'
 import { formatGroupAmount } from '../utils/currency'
 import { Alert, Chips, Empty, Loader } from '../components/ui'
 import Icon from '../components/Icon'
+import { useI18n } from '../i18n/I18nContext'
 
 const TIPOS = {
   grupo_creado: { icon: 'layers', label: 'Grupo creado' },
@@ -19,7 +20,7 @@ const TIPOS = {
 
 const fechaHora = f => new Date(f).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
 
-function parsearCSV(texto) {
+function parsearCSV(texto, t) {
   const normalizado = texto.replace(/^\uFEFF/, '')
   const primeraLinea = normalizado.split(/\r?\n/, 1)[0]
   const delimitador = (primeraLinea.match(/;/g) || []).length > (primeraLinea.match(/,/g) || []).length ? ';' : ','
@@ -39,10 +40,10 @@ function parsearCSV(texto) {
       fila = []
     } else campo += caracter
   }
-  if (entreComillas) throw new Error('El CSV tiene comillas sin cerrar.')
+  if (entreComillas) throw new Error(t('csv_unclosed_quotes'))
   fila.push(campo)
   if (fila.some(valor => valor.trim())) filas.push(fila)
-  if (filas.length < 2) throw new Error('El CSV debe incluir encabezados y al menos una transacción.')
+  if (filas.length < 2) throw new Error(t('csv_missing_rows'))
   const cabeceras = filas[0].map(valor => valor.trim().toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
   const indice = aliases => cabeceras.findIndex(valor => aliases.includes(valor))
   const columnas = {
@@ -52,7 +53,7 @@ function parsearCSV(texto) {
     categoria: indice(['categoria', 'category']),
   }
   if (Object.values(columnas).some(index => index < 0)) {
-    throw new Error('Incluye columnas descripción, fecha, monto y categoría.')
+    throw new Error(t('csv_missing_headers'))
   }
   return filas.slice(1).map((valores, index) => {
     const montoRaw = (valores[columnas.monto] || '').trim().replace(/\s/g, '')
@@ -78,9 +79,9 @@ function parsearCSV(texto) {
       fecha,
       monto,
       categoria,
-      error: !descripcion ? 'Falta descripción.' : !fechaValida ? 'Fecha inválida.' :
+      error: !descripcion ? t('csv_missing_description') : !fechaValida ? t('csv_invalid_date') :
         !Number.isFinite(monto) || monto <= 0 || Math.abs(monto * 100 - Math.round(monto * 100)) > 0.000001
-          ? 'Monto inválido.' : '',
+          ? t('csv_invalid_amount') : '',
     }
   })
 }
@@ -94,12 +95,14 @@ async function idempotencyUuid(value) {
 }
 
 function Estado({ g }) {
-  if (g.mi_estado === 'pendiente') return <small className="neg">Debes {money(g.mi_parte)}</small>
-  if (g.mi_estado === 'pagador' && g.me_deben > 0) return <small className="pos">Te deben {money(g.me_deben)}</small>
-  return <small className="pos">Saldado</small>
+  const { t } = useI18n()
+  if (g.mi_estado === 'pendiente') return <small className="neg">{t('history_you_owe', { amount: money(g.mi_parte) })}</small>
+  if (g.mi_estado === 'pagador' && g.me_deben > 0) return <small className="pos">{t('history_they_owe_you', { amount: money(g.me_deben) })}</small>
+  return <small className="pos">{t('settled')}</small>
 }
 
 export default function History({ user }) {
+  const { t, formatMonth, getCategoryLabel } = useI18n()
   const { data, error, loading } = useData(
     async () => {
       const [gastos, grupos, movimientos] = await Promise.all([
@@ -113,6 +116,7 @@ export default function History({ user }) {
   const [csvRows, setCsvRows] = useState([])
   const [csvGroup, setCsvGroup] = useState('')
   const [csvError, setCsvError] = useState('')
+  const [csvErrorType, setCsvErrorType] = useState('error')
   const [csvBusy, setCsvBusy] = useState(false)
 
   const filtrados = useMemo(() => (data?.gastos || []).filter(g =>
@@ -140,10 +144,11 @@ export default function History({ user }) {
   const total = filtrados.reduce((s, g) => s + g.monto_total * (g.tasa_cop || 1), 0)
   const importarCSV = async file => {
     setCsvError('')
+    setCsvErrorType('error')
     try {
-      if (!file || file.size > 2 * 1024 * 1024) throw new Error('El archivo CSV no puede superar 2 MB.')
-      const filas = parsearCSV(await file.text())
-      if (filas.length > 100) throw new Error('Importa como máximo 100 transacciones por archivo.')
+      if (!file || file.size > 2 * 1024 * 1024) throw new Error(t('csv_size_limit'))
+      const filas = parsearCSV(await file.text(), t)
+      if (filas.length > 100) throw new Error(t('csv_row_limit'))
       setCsvRows(filas)
       setCsvGroup(data.grupos[0]?.id || '')
     } catch (error) {
@@ -154,7 +159,7 @@ export default function History({ user }) {
   const guardarCSV = async () => {
     const grupoSeleccionado = data.grupos.find(g => String(g.id) === String(csvGroup))
     const validas = csvRows.filter(row => !row.error)
-    if (!grupoSeleccionado || validas.length === 0) return setCsvError('Elige un grupo y verifica que exista al menos una fila válida.')
+    if (!grupoSeleccionado || validas.length === 0) return setCsvError(t('csv_choose_group_error'))
     setCsvBusy(true)
     let guardadas = 0
     let enCola = 0
@@ -183,9 +188,11 @@ export default function History({ user }) {
         else guardadas += 1
       }
       setCsvRows([])
-      setCsvError(`${guardadas} transacción(es) importada(s); ${enCola} en cola offline. Revisa el grupo; la importación no marca pagos como confirmados.`)
+      setCsvError(t('csv_import_success', { imported: guardadas, queued: enCola }))
+      setCsvErrorType(enCola ? 'warning' : 'success')
     } catch (error) {
-      setCsvError(`${guardadas} importada(s), ${enCola} en cola offline; se detuvo el proceso: ${error.message}`)
+      setCsvError(t('csv_import_error', { imported: guardadas, queued: enCola, error: error.message }))
+      setCsvErrorType('error')
     } finally {
       setCsvBusy(false)
     }
@@ -195,32 +202,32 @@ export default function History({ user }) {
     <>
       <header className="page-header">
         <div>
-          <h1 className="page-title">Historial financiero</h1>
-          <p className="page-subtitle">Total filtrado <strong className="accent total-big">{money(total)}</strong></p>
+          <h1 className="page-title">{t('history_title')}</h1>
+          <p className="page-subtitle">{t('history_subtitle')} <strong className="accent total-big">{money(total)}</strong></p>
         </div>
       </header>
 
       <div className="filters">
-        <input aria-label="Buscar en el historial" type="search" value={query} onChange={e => setQuery(e.target.value)}
-          placeholder="Buscar descripción o artículo" />
+        <input aria-label={t('history_search')} type="search" value={query} onChange={e => setQuery(e.target.value)}
+          placeholder={t('history_search')} />
         <label className="select-chip">
           <Icon name="layers" size={15} />
-          <select value={grupo} onChange={e => setGrupo(e.target.value)} aria-label="Filtrar por grupo">
-            <option value="todos">Todos los grupos</option>
+          <select value={grupo} onChange={e => setGrupo(e.target.value)} aria-label={t('filter_all_groups')}>
+            <option value="todos">{t('filter_all_groups')}</option>
             {data.grupos.map(g => <option key={g.id} value={g.id}>{g.nombre}</option>)}
           </select>
         </label>
-        <Chips label="Filtrar por categoría" value={cat} onChange={setCat}
-          options={[{ id: 'todos', label: 'Todos' }, ...CATEGORIAS.map(c => ({ id: c.id, label: c.label }))]} />
+        <Chips label={t('filter_by_category')} value={cat} onChange={setCat}
+          options={[{ id: 'todos', label: t('filter_all') }, ...CATEGORIAS.map(c => ({ id: c.id, label: getCategoryLabel(c.id) }))]} />
       </div>
       <section className="section">
-        <h2 className="section-title">Importar transacciones CSV</h2>
-        <p className="muted">Columnas requeridas: descripción, fecha, monto y categoría. La importación solo registra gastos y no confirma pagos.</p>
-        <input type="file" accept=".csv,text/csv" aria-label="Seleccionar extracto CSV" onChange={e => importarCSV(e.target.files?.[0])} />
-        <Alert type={csvError.includes('cola offline') ? 'warning' : csvError.includes('importada(s)') ? 'success' : 'error'}>{csvError}</Alert>
+        <h2 className="section-title">{t('history_import_title')}</h2>
+        <p className="muted">{t('history_import_hint')}</p>
+        <input type="file" accept=".csv,text/csv" aria-label={t('history_choose_file')} onChange={e => importarCSV(e.target.files?.[0])} />
+        <Alert type={csvErrorType}>{csvError}</Alert>
         {csvRows.length > 0 && (
           <div className="form">
-            <label className="field">Grupo para importar
+            <label className="field">{t('history_import_group')}
               <select value={csvGroup} onChange={e => setCsvGroup(e.target.value)}>
                 {data.grupos.map(g => <option key={g.id} value={g.id}>{g.nombre} · {g.moneda || 'COP'}</option>)}
               </select>
@@ -235,18 +242,18 @@ export default function History({ user }) {
               ))}
             </ul>
             <button type="button" className="btn btn-primary" disabled={csvBusy || !csvRows.some(row => !row.error)} onClick={guardarCSV}>
-              {csvBusy ? 'Importando…' : `Importar ${csvRows.filter(row => !row.error).length} transacciones válidas`}
+            {csvBusy ? t('history_importing') : t('history_import_valid', { count: csvRows.filter(row => !row.error).length })}
             </button>
           </div>
         )}
       </section>
 
       {porMes.length === 0 ? (
-        <Empty icon="chart" title="No hay movimientos" text="Prueba con otros filtros." />
+        <Empty icon="chart" title={t('history_empty_title')} text={t('history_empty_desc')} />
       ) : porMes.map(([mes, items]) => (
         <section key={mes} className="month">
           <div className="month-head">
-            <span>{monthLabel(mes)}</span>
+            <span>{formatMonth(`${mes}-01`)}</span>
             <span>{money(items.reduce((s, g) => s + g.monto_total * (g.tasa_cop || 1), 0))}</span>
           </div>
           <ul className="card list-card">
@@ -255,7 +262,7 @@ export default function History({ user }) {
                 <span className="tile-icon sm cat"><Icon name={categoria(g.categoria).icon} size={18} /></span>
                 <div className="list-main">
                   <span className="list-title">{g.descripcion}</span>
-                  <small className="muted">{g.grupo?.nombre} · {g.fecha_gasto} · {g.personas} {g.personas === 1 ? 'persona' : 'personas'}</small>
+                  <small className="muted">{g.grupo?.nombre} · {g.fecha_gasto} · {t('history_persons_count', { count: g.personas })}</small>
                 </div>
                 <div className="list-end stacked">
                   <strong>{formatGroupAmount(g.monto_total, g.grupo)}</strong>
@@ -269,7 +276,7 @@ export default function History({ user }) {
 
       {data.movimientos.length > 0 && (
         <section className="month">
-          <div className="month-head"><span>Movimientos recientes</span></div>
+          <div className="month-head"><span>{t('history_recent')}</span></div>
           <ul className="card list-card">
             {data.movimientos.slice(0, 20).map(m => {
               const t = TIPOS[m.tipo_movimiento] || TIPOS.gasto_creado

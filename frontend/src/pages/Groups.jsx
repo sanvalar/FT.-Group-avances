@@ -7,8 +7,10 @@ import { Alert, AvatarStack, Empty, Loader, Modal, PageHeader } from '../compone
 import Icon from '../components/Icon'
 import { CIUDADES } from '../components/MapView'
 import { CURRENCIES } from '../currency/CurrencyContext'
+import { useI18n } from '../i18n/I18nContext'
 
 function NewGroupModal({ user, onClose, onCreated }) {
+  const { t } = useI18n()
   const [form, setForm] = useState({ nombre: '', descripcion: '', icono: 'building', ciudad: 'Medellín', moneda: 'COP', tasaCop: '1', instruccionesPago: '' })
   const [integrantes, setIntegrantes] = useState([''])
   const [error, setError] = useState('')
@@ -19,7 +21,7 @@ function NewGroupModal({ user, onClose, onCreated }) {
   const submit = async e => {
     e.preventDefault(); setError('')
     const validos = [...new Set(integrantes.map(x => x.trim().toLowerCase()).filter(Boolean))]
-    if (!validos.length) return setError('Agrega el correo de al menos un integrante además de ti.')
+    if (!validos.length) return setError(t('err_at_least_one_member'))
     setSaving(true)
     try {
       const c = CIUDADES.find(x => x.nombre === form.ciudad)
@@ -29,43 +31,43 @@ function NewGroupModal({ user, onClose, onCreated }) {
   }
 
   return (
-    <Modal title="Nuevo grupo" onClose={onClose}
+    <Modal title={t('modal_new_group_title')} onClose={onClose}
       footer={<>
-        <button className="btn btn-ghost" type="button" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" form="new-group" disabled={saving}>{saving ? 'Creando…' : 'Crear grupo'}</button>
+        <button className="btn btn-ghost" type="button" onClick={onClose}>{t('cancel')}</button>
+        <button className="btn btn-primary" form="new-group" disabled={saving}>{saving ? t('modal_new_group_creating') : t('modal_new_group_btn')}</button>
       </>}>
       <form id="new-group" className="form" onSubmit={submit}>
         <Alert>{error}</Alert>
         <div className="field">
-          <label htmlFor="g-nombre">Nombre del grupo</label>
-          <input id="g-nombre" name="nombre" value={form.nombre} onChange={change} placeholder="Ej. Apartamento 402" maxLength={120} required autoFocus />
+          <label htmlFor="g-nombre">{t('field_group_name')}</label>
+          <input id="g-nombre" name="nombre" value={form.nombre} onChange={change} placeholder={t('field_group_name_ph')} maxLength={120} required autoFocus />
         </div>
         <div className="form-row">
           <div className="field">
-            <label htmlFor="g-moneda">Moneda del grupo</label>
+            <label htmlFor="g-moneda">{t('group_currency')}</label>
             <select id="g-moneda" name="moneda" value={form.moneda}
               onChange={e => setForm(f => ({ ...f, moneda: e.target.value, tasaCop: e.target.value === 'COP' ? '1' : '' }))}>
               {Object.values(CURRENCIES).map(moneda => <option key={moneda.code} value={moneda.code}>{moneda.code} · {moneda.name}</option>)}
             </select>
           </div>
           {form.moneda !== 'COP' && <div className="field">
-            <label htmlFor="g-tasa-cop">Equivalencia a COP</label>
+            <label htmlFor="g-tasa-cop">{t('group_exchange_rate')}</label>
             <input id="g-tasa-cop" name="tasaCop" type="number" min="0.00000001" step="any"
               value={form.tasaCop} onChange={change} required />
-            <small className="hint">Cuántos COP vale 1 {form.moneda}. Se usará para comparar grupos en el panel.</small>
+            <small className="hint">{t('group_exchange_rate_hint', { currency: form.moneda })}</small>
           </div>}
           <div className="field">
-            <label htmlFor="g-pago">Instrucciones para pagar <span className="muted">(opcional)</span></label>
+            <label htmlFor="g-pago">{t('payment_instructions_label')} <span className="muted">({t('optional')})</span></label>
             <input id="g-pago" name="instruccionesPago" value={form.instruccionesPago} onChange={change} maxLength={500}
-              placeholder="Ej. Transferir por Nequi y avisar al grupo" />
+              placeholder={t('payment_instructions_placeholder')} />
           </div>
         </div>
         <div className="field">
-          <label htmlFor="g-desc">Descripción <span className="muted">(opcional)</span></label>
-          <input id="g-desc" name="descripcion" value={form.descripcion} onChange={change} placeholder="Gastos del hogar" />
+          <label htmlFor="g-desc">{t('field_group_desc')} <span className="muted">({t('optional')})</span></label>
+          <input id="g-desc" name="descripcion" value={form.descripcion} onChange={change} placeholder={t('field_group_desc_ph')} />
         </div>
         <div className="field">
-          <span className="label">Tipo</span>
+          <span className="label">{t('group_type_label')}</span>
           <div className="icon-picker">
             {GROUP_ICONS.map(i => (
               <button type="button" key={i.id} className={`icon-option${form.icono === i.id ? ' active' : ''}`}
@@ -76,27 +78,27 @@ function NewGroupModal({ user, onClose, onCreated }) {
           </div>
         </div>
         <div className="field">
-          <label htmlFor="g-ciudad">Ciudad</label>
+          <label htmlFor="g-ciudad">{t('group_city')}</label>
           <select id="g-ciudad" name="ciudad" value={form.ciudad} onChange={change}>
             {CIUDADES.map(c => <option key={c.nombre}>{c.nombre}</option>)}
           </select>
         </div>
         <div className="field">
-          <span className="label">Integrantes</span>
+          <span className="label">{t('group_members')}</span>
           <div className="members-edit">
             {integrantes.map((x, i) => (
               <div className="member-row member-row-single" key={i}>
-                <input aria-label={`Correo del integrante ${i + 1}`} type="email" placeholder="correo@ejemplo.com" value={x} onChange={e => setInt(i, e.target.value)} />
+                <input aria-label={`${t('group_member_email')} ${i + 1}`} type="email" placeholder="correo@ejemplo.com" value={x} onChange={e => setInt(i, e.target.value)} />
                 {integrantes.length > 1 && (
-                  <button type="button" className="icon-btn" aria-label="Quitar" onClick={() => setIntegrantes(l => l.filter((_, j) => j !== i))}><Icon name="close" size={16} /></button>
+                  <button type="button" className="icon-btn" aria-label={t('group_remove_member')} onClick={() => setIntegrantes(l => l.filter((_, j) => j !== i))}><Icon name="close" size={16} /></button>
                 )}
               </div>
             ))}
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIntegrantes(l => [...l, ''])}>
-              <Icon name="plus" size={16} />Agregar integrante
+              <Icon name="plus" size={16} />{t('group_add_member')}
             </button>
           </div>
-          <small className="hint">Escribe el correo con el que cada integrante se registró en FT. GROUP. Tú quedas como administrador.</small>
+          <small className="hint">{t('group_member_email_help')}</small>
         </div>
       </form>
     </Modal>
@@ -104,6 +106,7 @@ function NewGroupModal({ user, onClose, onCreated }) {
 }
 
 function AddMemberModal({ user, grupo, onClose, onAdded }) {
+  const { t } = useI18n()
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -113,17 +116,17 @@ function AddMemberModal({ user, grupo, onClose, onAdded }) {
     catch (err) { setError(err.message); setSaving(false) }
   }
   return (
-    <Modal title={`Agregar a ${grupo.nombre}`} onClose={onClose}
+    <Modal title={`${t('group_add_member')} · ${grupo.nombre}`} onClose={onClose}
       footer={<>
-        <button className="btn btn-ghost" type="button" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" form="add-member" disabled={saving}>{saving ? 'Agregando…' : 'Agregar'}</button>
+        <button className="btn btn-ghost" type="button" onClick={onClose}>{t('cancel')}</button>
+        <button className="btn btn-primary" form="add-member" disabled={saving}>{saving ? t('group_add_member_saving') : t('group_add_member_btn')}</button>
       </>}>
       <form id="add-member" className="form" onSubmit={submit}>
         <Alert>{error}</Alert>
         <div className="field">
-          <label htmlFor="m-email">Correo del integrante</label>
+          <label htmlFor="m-email">{t('group_member_email')}</label>
           <input id="m-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" required autoFocus />
-          <small className="hint">La persona debe tener una cuenta registrada en FT. GROUP.</small>
+          <small className="hint">{t('group_member_email_hint')}</small>
         </div>
       </form>
     </Modal>
@@ -131,6 +134,7 @@ function AddMemberModal({ user, grupo, onClose, onAdded }) {
 }
 
 export default function Groups({ user }) {
+  const { t } = useI18n()
   const { data: grupos, error, loading, reload } = useData(() => financeApi.groups(user), [user.id])
   const [creating, setCreating] = useState(false)
   const [adding, setAdding] = useState(null)
@@ -138,13 +142,13 @@ export default function Groups({ user }) {
   if (loading) return <Loader />
   if (error) return <Alert>{error}</Alert>
 
-  const action = <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size={18} />Nuevo grupo</button>
+  const action = <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size={18} />{t('new_group_btn')}</button>
 
   return (
     <>
-      <PageHeader title="Grupos financieros" subtitle={`${grupos.length} ${grupos.length === 1 ? 'grupo activo' : 'grupos activos'}`} action={action} />
+      <PageHeader title={t('groups_title')} subtitle={t('groups_subtitle', { count: grupos.length })} action={action} />
       {grupos.length === 0 ? (
-        <Empty icon="users" title="Todavía no perteneces a ningún grupo" text="Crea un grupo para tu apartamento, un viaje o tu equipo de trabajo." action={action} />
+        <Empty icon="users" title={t('groups_empty_title')} text={t('groups_empty_desc')} action={action} />
       ) : (
         <div className="group-grid">
           {grupos.map(g => (
@@ -153,20 +157,20 @@ export default function Groups({ user }) {
                 <span className="tile-icon"><Icon name={g.icono} size={22} /></span>
                 <div>
                   <h3>{g.nombre}</h3>
-                  <small className="muted">{g.miembros.length} miembros{g.ciudad ? ` · ${g.ciudad}` : ''}</small>
+                  <small className="muted">{t('group_members_count', { count: g.miembros.length })}{g.ciudad ? ` · ${g.ciudad}` : ''}</small>
                   <small className="muted">{g.moneda || 'COP'}{g.moneda && g.moneda !== 'COP' ? ` · 1 ${g.moneda} = ${g.tasaCop} COP` : ''}{g.instruccionesPago ? ` · ${g.instruccionesPago}` : ''}</small>
                 </div>
-                {g.rol === 'administrador' && <span className="pill">Admin</span>}
+                {g.rol === 'administrador' && <span className="pill">{t('group_admin_badge')}</span>}
               </header>
               <AvatarStack users={g.miembros} />
               <div className="kv-grid">
-                <div className="kv"><small>Total gastos</small><strong>{money(g.total_gastos)}</strong></div>
-                <div className="kv"><small>Mi balance</small><strong className={g.mi_balance < 0 ? 'neg' : 'pos'}>{money(g.mi_balance)}</strong></div>
+                <div className="kv"><small>{t('group_total_expenses')}</small><strong>{money(g.total_gastos)}</strong></div>
+                <div className="kv"><small>{t('group_my_balance')}</small><strong className={g.mi_balance < 0 ? 'neg' : 'pos'}>{money(g.mi_balance)}</strong></div>
               </div>
               <div className="card-actions">
-                <Link className="card-link" to={`/gastos?grupo=${g.id}`}>Ver {g.num_gastos} {g.num_gastos === 1 ? 'gasto' : 'gastos'} <Icon name="arrow" size={15} /></Link>
+                <Link className="card-link" to={`/gastos?grupo=${g.id}`}>{t('group_view_expenses', { count: g.num_gastos })} <Icon name="arrow" size={15} /></Link>
                 {g.rol === 'administrador' && (
-                  <button className="btn btn-ghost btn-xs" onClick={() => setAdding(g)}><Icon name="plus" size={14} />Integrante</button>
+                  <button className="btn btn-ghost btn-xs" onClick={() => setAdding(g)}><Icon name="plus" size={14} />{t('group_members')}</button>
                 )}
               </div>
             </article>

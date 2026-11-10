@@ -4,6 +4,14 @@ import { money, moneyShort } from '../utils/format'
 
 const I18nContext = createContext(null)
 const STORAGE_KEY = 'ft_language'
+const DATE_LOCALES = {
+  es: 'es-CO',
+  en: 'en-US',
+  pt: 'pt-BR',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  it: 'it-IT',
+}
 
 export const SUPPORTED_LANGUAGES = [
   { id: 'auto', labelKey: 'auto_lang', flag: '🌐', short: 'AUTO' },
@@ -14,6 +22,7 @@ export const SUPPORTED_LANGUAGES = [
   { id: 'de', labelKey: 'german', flag: '🇩🇪', short: 'DE', name: 'Deutsch' },
   { id: 'it', labelKey: 'italian', flag: '🇮🇹', short: 'IT', name: 'Italiano' },
 ]
+const LANGUAGE_IDS = new Set(SUPPORTED_LANGUAGES.map(language => language.id))
 
 function getDeviceLanguage() {
   if (typeof navigator === 'undefined') return 'es'
@@ -35,7 +44,8 @@ export function I18nProvider({ children }) {
   const [deviceLang, setDeviceLang] = useState(getDeviceLanguage)
   const [selectedLang, setSelectedLang] = useState(() => {
     try {
-      return localStorage.getItem(STORAGE_KEY) || 'auto'
+      const saved = localStorage.getItem(STORAGE_KEY)
+      return LANGUAGE_IDS.has(saved) ? saved : 'auto'
     } catch {
       return 'auto'
     }
@@ -52,7 +62,14 @@ export function I18nProvider({ children }) {
 
   const currentLang = selectedLang === 'auto' ? deviceLang : selectedLang
 
+  useEffect(() => {
+    document.documentElement.lang = currentLang
+  }, [currentLang])
+
   const setLanguage = (lang) => {
+    if (!LANGUAGE_IDS.has(lang)) {
+      throw new Error(`Idioma no soportado: ${lang}`)
+    }
     setSelectedLang(lang)
     try {
       localStorage.setItem(STORAGE_KEY, lang)
@@ -82,15 +99,14 @@ export function I18nProvider({ children }) {
   const formatMonth = (isoDate) => {
     if (!isoDate) return ''
     const [y, m] = isoDate.split('-').map(Number)
-    const monthKey = `month_${m}`
-    const monthName = t(monthKey)
-    return `${monthName} ${y}`
+    const monthName = new Intl.DateTimeFormat(DATE_LOCALES[currentLang], { month: 'long' })
+      .format(new Date(y, m - 1, 1))
+    return currentLang === 'es' ? `${monthName} de ${y}` : `${monthName} ${y}`
   }
 
   const formatCurrentMonth = () => {
     const d = new Date()
-    const monthKey = `month_${d.getMonth() + 1}`
-    const monthName = t(monthKey)
+    const monthName = new Intl.DateTimeFormat(DATE_LOCALES[currentLang], { month: 'long' }).format(d)
     return currentLang === 'es' ? `${monthName} de ${d.getFullYear()}` : `${monthName} ${d.getFullYear()}`
   }
 

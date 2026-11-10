@@ -12,14 +12,14 @@ import { usesLocalFinance } from '../services/financeApi'
 import { useI18n } from '../i18n/I18nContext'
 
 const NAV_BASE = [
-  { to: '/panel', label: 'Panel de control', short: 'Panel', icon: 'grid' },
-  { to: '/grupos', label: 'Grupos financieros', short: 'Grupos', icon: 'layers' },
-  { to: '/gastos', label: 'Registro de gastos', short: 'Gastos', icon: 'receipt' },
-  { to: '/historial', label: 'Historial financiero', short: 'Historial', icon: 'chart' },
-  { to: '/analisis', label: 'Análisis y predicciones', short: 'Análisis', icon: 'trend' },
-  { to: '/educacion', label: 'Educación financiera', short: 'Aprender', icon: 'brain' },
-  { to: '/escanear', label: 'Escanear', short: 'Escanear', icon: 'scan', badge: 'IA' },
-  { to: '/soporte', label: 'Soporte', short: 'Soporte', icon: 'ticket' },
+  { to: '/panel', labelKey: 'nav_dashboard', shortKey: 'short_dashboard', icon: 'grid' },
+  { to: '/grupos', labelKey: 'nav_groups', shortKey: 'short_groups', icon: 'layers' },
+  { to: '/gastos', labelKey: 'nav_expenses', shortKey: 'short_expenses', icon: 'receipt' },
+  { to: '/historial', labelKey: 'nav_history', shortKey: 'short_history', icon: 'chart' },
+  { to: '/analisis', labelKey: 'nav_analysis', shortKey: 'short_analysis', icon: 'trend' },
+  { to: '/educacion', labelKey: 'nav_education', shortKey: 'nav_learning', icon: 'brain' },
+  { to: '/escanear', labelKey: 'nav_scan', shortKey: 'short_scan', icon: 'scan', badge: 'IA' },
+  { to: '/soporte', labelKey: 'nav_support', shortKey: 'nav_support', icon: 'ticket' },
 ]
 
 export const NAV = NAV_BASE
@@ -47,20 +47,21 @@ export default function Layout({ user, onLogout, children }) {
   const [open, setOpen] = useState(false)
   const location = useLocation()
   const online = useOnline()
+  const { t } = useI18n()
   const navigation = user?.rol === 'supervisor'
     ? [
-        { to: '/supervision', label: 'Supervisión de usuarios', short: 'Supervisión', icon: 'users' },
-        { to: '/administracion', label: 'Administración', short: 'Admin', icon: 'shield' },
-        { to: '/auditoria', label: 'Auditoría', short: 'Auditoría', icon: 'file' },
-        { to: '/estado-sistema', label: 'Estado del sistema', short: 'Estado', icon: 'shield' },
-        { to: '/educacion', label: 'Control educativo', short: 'Educación', icon: 'brain' },
+        { to: '/supervision', labelKey: 'nav_supervision', shortKey: 'nav_supervision_short', icon: 'users' },
+        { to: '/administracion', labelKey: 'nav_administration', shortKey: 'nav_admin_short', icon: 'shield' },
+        { to: '/auditoria', labelKey: 'nav_audit', shortKey: 'nav_audit_short', icon: 'file' },
+        { to: '/estado-sistema', labelKey: 'nav_system_status', shortKey: 'nav_status_short', icon: 'shield' },
+        { to: '/educacion', labelKey: 'nav_education_control', shortKey: 'nav_education_short', icon: 'brain' },
       ]
     : user?.rol === 'moderador'
       ? [
-        { to: '/moderacion', label: 'Panel de moderación', short: 'Panel', icon: 'grid' },
-        { to: '/administracion', label: 'Administración', short: 'Admin', icon: 'shield' },
-        { to: '/soporte', label: 'Soporte', short: 'Soporte', icon: 'ticket' },
-        { to: '/educacion', label: 'Moderación educativa', short: 'Educación', icon: 'brain' },
+        { to: '/moderacion', labelKey: 'nav_moderation', shortKey: 'short_dashboard', icon: 'grid' },
+        { to: '/administracion', labelKey: 'nav_administration', shortKey: 'nav_admin_short', icon: 'shield' },
+        { to: '/soporte', labelKey: 'nav_support', shortKey: 'nav_support', icon: 'ticket' },
+        { to: '/educacion', labelKey: 'nav_education_moderation', shortKey: 'nav_education_short', icon: 'brain' },
       ]
       : NAV_BASE
 
@@ -72,16 +73,16 @@ export default function Layout({ user, onLogout, children }) {
 
   return (
     <div className="shell">
-      <aside className={`sidebar${open ? ' sidebar-open' : ''}`} aria-label="Navegación principal">
+      <aside className={`sidebar${open ? ' sidebar-open' : ''}`} aria-label={t('nav_primary')}>
         <div className="sidebar-top">
           <Logo />
-          <button className="icon-btn sidebar-close" onClick={() => setOpen(false)} aria-label="Cerrar menú"><Icon name="close" /></button>
+          <button className="icon-btn sidebar-close" onClick={() => setOpen(false)} aria-label={t('nav_close')}><Icon name="close" /></button>
         </div>
         <nav className="nav">
           {navigation.map(item => (
             <NavLink key={item.to} to={item.to} className="nav-link">
               <Icon name={item.icon} size={18} />
-              <span>{item.label}</span>
+              <span>{t(item.labelKey)}</span>
               {item.badge && <em className="badge-ia">{item.badge}</em>}
             </NavLink>
           ))}
@@ -91,11 +92,11 @@ export default function Layout({ user, onLogout, children }) {
             <Avatar user={user} size={36} />
             <span>
               <strong>{firstName(user.nombre)}</strong>
-              <small>{user.rol ? `${user.rol[0].toUpperCase() + user.rol.slice(1)} · Mi perfil` : 'Mi perfil'}</small>
+              <small>{user.rol ? t('role_admin_profile', { role: user.rol[0].toUpperCase() + user.rol.slice(1) }) : t('nav_profile')}</small>
             </span>
           </NavLink>
           <button className="nav-link nav-logout" onClick={onLogout}>
-            <Icon name="logout" size={18} /><span>Cerrar sesión</span>
+            <Icon name="logout" size={18} /><span>{t('nav_logout')}</span>
           </button>
         </div>
       </aside>
@@ -103,25 +104,25 @@ export default function Layout({ user, onLogout, children }) {
 
       <div className="main">
         <header className="topbar">
-          <button className="icon-btn menu-btn" onClick={() => setOpen(true)} aria-label="Abrir menú"><Icon name="menu" size={22} /></button>
+          <button className="icon-btn menu-btn" onClick={() => setOpen(true)} aria-label={t('nav_open')}><Icon name="menu" size={22} /></button>
           <span className="topbar-brand"><Logo /></span>
-          <span className="topbar-text">FT-GROUP · Sistema de gestión financiera colaborativa</span>
-          {usesLocalFinance(user) && <span className="demo-mode-label">EXPOSICIÓN · DATOS DE EJEMPLO</span>}
+          <span className="topbar-text">{t('app_subtitle')}</span>
+          {usesLocalFinance(user) && <span className="demo-mode-label">{t('demo_badge')}</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CurrencySwitch />
             <ThemeSwitch compact />
             <LanguageSwitch />
-            <span className={`status${online ? '' : ' status-off'}`}><i />{online ? 'En línea' : 'Sin conexión'}</span>
+            <span className={`status${online ? '' : ' status-off'}`}><i />{online ? t('status_online') : t('status_offline')}</span>
           </div>
         </header>
         <main className="content">{children}</main>
       </div>
 
-      <nav className="tabbar" aria-label="Navegación rápida">
+      <nav className="tabbar" aria-label={t('nav_quick')}>
         {navigation.map(item => (
           <NavLink key={item.to} to={item.to} className="tab">
             <Icon name={item.icon} size={20} />
-            <span>{item.short}</span>
+            <span>{t(item.shortKey)}</span>
           </NavLink>
         ))}
       </nav>

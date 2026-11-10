@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { financeApi, usesLocalFinance } from '../services/financeApi'
 import { useData } from '../utils/useData'
-import { currentMonthLabel, firstName, money } from '../utils/format'
+import { firstName, money } from '../utils/format'
 import { formatGroupAmount } from '../utils/currency'
 import { Alert, Avatar, Empty, Loader, PageHeader } from '../components/ui'
 import Icon from '../components/Icon'
 import MapView from '../components/MapView'
+import { useI18n } from '../i18n/I18nContext'
 
 export default function Dashboard({ user }) {
+  const { t, formatCurrentMonth } = useI18n()
   const me = String(user.id)
   const { data, error, loading, reload } = useData(async () => {
     const resumen = await financeApi.summary(user)
@@ -73,8 +75,8 @@ export default function Dashboard({ user }) {
       setMsg({
         type: 'success',
         text: isLocal
-          ? `Liquidación de ${formatGroupAmount(p.montoGrupo ?? p.monto, grupoPago)} registrada en la demostración.`
-          : `Pago de ${formatGroupAmount(p.montoGrupo ?? p.monto, grupoPago)} reportado en ${p.grupo}; queda pendiente de confirmación.${instrucciones ? ` Instrucciones del grupo: ${instrucciones}` : ''}`,
+          ? t('settlement_local_success', { amount: formatGroupAmount(p.montoGrupo ?? p.monto, grupoPago) })
+          : `${t('settlement_reported_success', { amount: formatGroupAmount(p.montoGrupo ?? p.monto, grupoPago), group: p.grupo })}${instrucciones ? ` ${t('payment_instructions', { instructions: instrucciones })}` : ''}`,
       })
       await reload()
     } catch (err) {
@@ -88,7 +90,10 @@ export default function Dashboard({ user }) {
     try {
       await financeApi.confirmSettlement(user, p.grupo_id, pendiente.id)
       const grupoPago = grupos.find(grupo => String(grupo.id) === String(p.grupo_id))
-      setMsg({ type: 'success', text: `Recepción de ${formatGroupAmount(pendiente.monto, grupoPago)} confirmada en ${p.grupo}.` })
+      setMsg({
+        type: 'success',
+        text: t('settlement_confirmed_success', { amount: formatGroupAmount(pendiente.monto, grupoPago), group: p.grupo }),
+      })
       await reload()
     } catch (err) {
       setMsg({ type: 'error', text: err.message })
@@ -97,24 +102,24 @@ export default function Dashboard({ user }) {
 
   return (
     <>
-      <PageHeader title="Panel de control"
-        subtitle={`${currentMonthLabel()} · ${grupos.length} ${grupos.length === 1 ? 'grupo activo' : 'grupos activos'}`} />
+      <PageHeader title={t('dash_title')}
+        subtitle={t('dash_subtitle', { month: formatCurrentMonth(), count: grupos.length })} />
 
       <div className="stats">
         <div className="stat">
-          <span className="stat-label">Balance neto</span>
+          <span className="stat-label">{t('stat_net_balance')}</span>
           <strong className={`stat-value ${balance < 0 ? 'neg' : 'pos'}`}>{money(balance)}</strong>
-          <small>Tu posición actual</small>
+          <small>{t('stat_net_balance_hint')}</small>
         </div>
         <div className="stat">
-          <span className="stat-label">Te deben</span>
+          <span className="stat-label">{t('stat_you_are_owed')}</span>
           <strong className="stat-value pos">{money(teDeben)}</strong>
-          <small>Pendiente de cobro</small>
+          <small>{t('stat_you_are_owed_hint')}</small>
         </div>
         <div className="stat">
-          <span className="stat-label">Debes</span>
+          <span className="stat-label">{t('stat_you_owe')}</span>
           <strong className="stat-value neg">{money(-debes)}</strong>
-          <small>Pendiente de pago</small>
+          <small>{t('stat_you_owe_hint')}</small>
         </div>
       </div>
 
@@ -123,15 +128,15 @@ export default function Dashboard({ user }) {
 
       {offlineQueue.length > 0 && (
         <section className="section">
-          <h2 className="section-title">Gastos pendientes de sincronización</h2>
-          <p className="muted">Los gastos en esta lista aún no afectan los balances del grupo.</p>
+          <h2 className="section-title">{t('offline_queue_title')}</h2>
+          <p className="muted">{t('offline_queue_hint')}</p>
           <ul className="list">
             {offlineQueue.map(item => (
               <li key={item.id} className="list-row">
                 <div className="list-main">
                   <span className="list-title">{item.descripcion}</span>
                   <small className={item.status === 'needs_review' ? 'neg' : 'muted'}>
-                    {item.status === 'needs_review' ? `Requiere revisión: ${item.error}` : 'Esperando conexión para sincronizar'}
+                    {item.status === 'needs_review' ? t('offline_needs_review', { error: item.error }) : t('offline_waiting')}
                   </small>
                 </div>
                 <div className="list-end">
@@ -140,11 +145,11 @@ export default function Dashboard({ user }) {
                       const remaining = await financeApi.retryOfflineExpense(user, item.id)
                       setOfflineQueue(remaining)
                       if (remaining.length < offlineQueue.length) reload()
-                    }}>Reintentar</button>
+                    }}>{t('retry')}</button>
                   )}
                   <button className="btn btn-danger-ghost btn-xs" onClick={async () => {
                     setOfflineQueue(await financeApi.discardOfflineExpense(user, item.id))
-                  }}>Descartar</button>
+                  }}>{t('discard')}</button>
                 </div>
               </li>
             ))}
@@ -154,9 +159,9 @@ export default function Dashboard({ user }) {
 
       <div className="dash-grid">
         <section className="section">
-          <h2 className="section-title">Liquidaciones sugeridas</h2>
+          <h2 className="section-title">{t('settlements_title')}</h2>
           {liquidaciones.length === 0 ? (
-            <Empty icon="check" title="¡Todo al día!" text="No hay deudas pendientes en tus grupos." />
+            <Empty icon="check" title={t('settlements_empty_title')} text={t('settlements_empty_desc')} />
           ) : (
             <ul className="list">
               {liquidaciones.map(p => {
@@ -180,17 +185,17 @@ export default function Dashboard({ user }) {
                         && <small className="muted">{grupoPago.instruccionesPago}</small>}
                       {mine && p.de === me && (
                         pendiente
-                          ? <small className="muted">Esperando confirmación</small>
+                          ? <small className="muted">{t('settlement_waiting')}</small>
                           : <button className="btn btn-ghost btn-xs" disabled={busy === key} onClick={() => settle(p)}>
-                              {busy === key ? '…' : 'Reportar pago'}
+                              {busy === key ? '…' : t('report_payment')}
                             </button>
                       )}
                       {mine && p.para === me && (
                         pendiente
                           ? <button className="btn btn-ghost btn-xs" disabled={busy === key} onClick={() => confirmar(p, pendiente)}>
-                              {busy === key ? '…' : 'Confirmar recibido'}
+                              {busy === key ? '…' : t('confirm_receipt')}
                             </button>
-                          : <small className="muted">Pendiente de pago</small>
+                          : <small className="muted">{t('pending_payment')}</small>
                       )}
                     </div>
                   </li>
@@ -202,12 +207,12 @@ export default function Dashboard({ user }) {
 
         <section className="section">
           <div className="section-head">
-            <h2 className="section-title">Mis grupos</h2>
-            <Link to="/grupos" className="link small">Ver todos</Link>
+            <h2 className="section-title">{t('my_groups_title')}</h2>
+            <Link to="/grupos" className="link small">{t('my_groups_view_all')}</Link>
           </div>
           {grupos.length === 0 ? (
-            <Empty title="Aún no tienes grupos" text="Crea tu primer grupo para empezar a registrar gastos."
-              action={<Link to="/grupos" className="btn btn-primary btn-sm"><Icon name="plus" size={16} />Nuevo grupo</Link>} />
+            <Empty title={t('my_groups_empty_title')} text={t('my_groups_empty_desc')}
+              action={<Link to="/grupos" className="btn btn-primary btn-sm"><Icon name="plus" size={16} />{t('new_group_btn')}</Link>} />
           ) : (
             <ul className="list">
               {grupos.map(g => (
@@ -216,7 +221,7 @@ export default function Dashboard({ user }) {
                     <span className="tile-icon"><Icon name={g.icono} size={20} /></span>
                     <div className="list-main">
                       <span className="list-title">{g.nombre}</span>
-                      <small className="muted">{g.miembros.length} miembros</small>
+                      <small className="muted">{t('group_members_count', { count: g.miembros.length })}</small>
                     </div>
                     <strong className={`amount ${g.mi_balance < 0 ? 'neg' : 'pos'}`}>{money(g.mi_balance)}</strong>
                   </Link>
@@ -229,7 +234,7 @@ export default function Dashboard({ user }) {
 
       {grupos.length > 0 && (
         <section className="section">
-          <h2 className="section-title">Mapa de mis grupos</h2>
+          <h2 className="section-title">{t('groups_map_title')}</h2>
           <MapView grupos={grupos} />
         </section>
       )}

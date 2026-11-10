@@ -43,6 +43,14 @@ La cuenta `usuario@ftgroup.test` usa automáticamente datos financieros de demos
 - **Tablet (721–1023 px):** menú lateral que se abre con el botón ☰, como en el prototipo de tablet.
 - **Celular (≤ 720 px):** barra de navegación inferior, tabla de gastos en forma de tarjetas, filtros con desplazamiento horizontal y ventanas que suben desde abajo.
 
+## Idioma
+
+El selector de idioma cambia inmediatamente los textos localizados de navegación,
+inicio de sesión, panel, grupos, gastos, historial y perfil. La preferencia se
+guarda en el navegador; **Automático** usa el idioma del dispositivo. También se
+actualiza el atributo `lang` del documento para lectores de pantalla y otras
+herramientas del navegador.
+
 ## Cómo ejecutar
 
 Los pasos completos (base de datos, backend y frontend) están en el [README principal](../README.md). Solo el frontend, desde esta carpeta:
