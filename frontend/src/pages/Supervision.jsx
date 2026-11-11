@@ -20,6 +20,7 @@ export default function Supervision() {
   const [loadingUsuarios, setLoadingUsuarios] = useState(true)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
   const [error, setError] = useState('')
+  const usuarioSeleccionado = usuarios.find(usuario => String(usuario.id) === usuarioId)
 
   useEffect(() => {
     supervisionApi.users()
@@ -41,12 +42,12 @@ export default function Supervision() {
     setDetalle(null)
     setLoadingDetalle(true)
     setError('')
-    supervisionApi.userFinance(usuarioId, { limite: PAGE_SIZE, offset })
+    supervisionApi.userFinance(usuarioId, { limite: PAGE_SIZE, offset }, usuarioSeleccionado?.email)
       .then(data => { if (vigente) setDetalle(data) })
       .catch(err => { if (vigente) { setDetalle(null); setError(err.message || 'No fue posible consultar la actividad financiera.') } })
       .finally(() => { if (vigente) setLoadingDetalle(false) })
     return () => { vigente = false }
-  }, [usuarioId, offset])
+  }, [usuarioId, offset, usuarioSeleccionado?.email])
 
   const cambiarUsuario = event => {
     setUsuarioId(event.target.value)
