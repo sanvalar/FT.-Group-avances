@@ -187,6 +187,12 @@ Para crear o restablecer las cuentas de demostración ejecuta `npm run seed:role
 
 El comando actualiza únicamente las tres direcciones de correo de prueba.
 
+Para llenar la bandeja de soporte con cuatro casos de ejemplo (abierto, en
+revisión, resuelto y cerrado), ejecuta `npm run seed:soporte` después de
+`npm run seed:roles`. Los casos pertenecen a `usuario@ftgroup.test`, incluyen
+mensajes de seguimiento y no se duplican al volver a ejecutar el comando. El
+seeder está bloqueado cuando `NODE_ENV=production`.
+
 ### Auditoría
 
 La migración `005_auditoria.sql` crea una bitácora cronológica de actividad. Las solicitudes autenticadas a la API quedan registradas con actor, rol vigente, método, ruta, código HTTP y fecha. También se registran los registros de cuenta, inicios y cierres de sesión, renovaciones de token y las acciones financieras principales del modo local de demostración.
