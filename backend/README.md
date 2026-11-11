@@ -232,7 +232,9 @@ Todas estas rutas requieren `Authorization: Bearer <accessToken>`.
 |--------|------|---------|
 | GET / POST | `/api/grupos` | Listar los grupos propios / crear un grupo (el creador queda como administrador). |
 | GET | `/api/grupos/:grupoId/integrantes` | Consultar integrantes activos del grupo. |
-| POST | `/api/grupos/:grupoId/integrantes` | Agregar un integrante por ID (`{ "usuarioId": 2 }`) o correo (`{ "email": "ana@example.com" }`). Solo administradores gestionan integrantes. |
+| POST | `/api/grupos/:grupoId/integrantes` | Agregar un integrante por ID (`{ "usuarioId": 2 }`) o correo (`{ "email": "ana@example.com" }`). Solo administradores gestionan integrantes; se aplican los límites por usuario y grupo. |
+| POST | `/api/educacion/progreso` | Enviar `{ "leccionId": "presupuesto-essencial", "respuesta": 1 }`; el backend verifica la respuesta y aprueba con 70% o más. |
+| POST | `/api/educacion/metas/:metaId/aportes` | Registrar un aporte acumulativo con `{ "aporte": 50000 }`; no mueve dinero ni representa una transferencia bancaria. |
 | DELETE | `/api/grupos/:grupoId/integrantes/:usuarioId` | Retirar un integrante; el grupo conserva un administrador activo. |
 | GET / POST | `/api/grupos/:grupoId/gastos` | Consultar o registrar gastos con división equitativa, personalizada, porcentual o por participaciones; admite artículos, moneda original, tasa de cambio e idempotencia. |
 | GET | `/api/grupos/:grupoId/recurrencias` | Consultar las recurrencias del grupo. |
@@ -292,6 +294,13 @@ reducen una deuda hasta la confirmación del acreedor; se requiere aplicar
 `013_liquidaciones_confirmadas.sql` antes de usar este flujo. En el cliente,
 los errores del modo API se muestran como errores y no se reemplazan por datos
 locales; la demostración local se selecciona explícitamente.
+
+Una persona puede pertenecer a un máximo de 10 grupos activos y cada grupo
+admite hasta 20 personas, contando a su administrador. Los límites también se
+verifican transaccionalmente al crear grupos o agregar integrantes, para evitar
+excederlos con operaciones simultáneas. Las respuestas correctas de las
+evaluaciones educativas se comparan en el backend y no se envían en el contenido
+de las lecciones.
 
 ### Verificación de comprobantes
 

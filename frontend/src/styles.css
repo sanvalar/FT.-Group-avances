@@ -293,6 +293,13 @@ h1, h2, h3 { margin: 0; }
 .group-head { display: flex; align-items: center; gap: 14px; }
 .group-head h3 { font: 700 17px var(--font-display); }
 .group-head > div { flex: 1; min-width: 0; }
+.group-members { padding: 10px 12px; border-radius: 12px; background: var(--inset); }
+.group-members summary { color: var(--accent-hi); font-size: 13px; font-weight: 700; cursor: pointer; }
+.group-members ul { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.group-members li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.group-members li span { display: grid; min-width: 0; }
+.group-members li strong { overflow-wrap: anywhere; }
+.group-members li small { color: var(--muted); font-size: 11px; }
 .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .kv { background: var(--inset); border-radius: 12px; padding: 12px 14px; display: grid; gap: 2px; }
 .kv small { font-size: 12px; color: var(--muted); font-style: italic; }
@@ -956,12 +963,17 @@ body[data-theme="vivid"] {
 .education-card:hover { transform: translateY(-2px); border-color: var(--accent); }
 .education-card.completed { border-color: rgba(74,222,128,.45); }
 .education-status { float: right; padding: 4px 8px; border-radius: 999px; background: var(--inset); color: var(--muted); font-size: 11px; }
+.education-status-failed { color: var(--neg); }
 .education-card h3 { margin-top: 26px; }
 .education-card .link { color: var(--accent-hi); font-weight: 700; }
 .education-goals { margin-top: 24px; }
 .education-goal-form { display: grid; grid-template-columns: 1fr minmax(140px, .35fr) auto; gap: 10px; margin: 16px 0; }
 .education-goals article { margin-top: 14px; }
 .education-goals article small { display: block; color: var(--muted); }
+.education-goal-item { padding: 14px; border-radius: 12px; background: var(--inset); }
+.education-goal-item p { margin: 6px 0; color: var(--muted); }
+.education-contribution-form { display: flex; gap: 8px; margin-top: 12px; }
+.education-contribution-form input { max-width: 220px; }
 .bar { height: 7px; overflow: hidden; margin-top: 7px; border-radius: 99px; background: var(--inset); }
 .bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-hi)); }
 .education-modal { width: min(760px, calc(100vw - 30px)); max-height: calc(100dvh - 30px); overflow-y: auto; }
@@ -973,6 +985,8 @@ body[data-theme="vivid"] {
   .education-hero { align-items: flex-start; }
   .education-progress { width: 86px; height: 86px; }
   .education-goal-form { grid-template-columns: 1fr; }
+  .education-contribution-form { flex-direction: column; }
+  .education-contribution-form input { max-width: none; }
   .supervision-select { grid-template-columns: 1fr; gap: 8px; }
   .supervision-stats { grid-template-columns: 1fr 1fr; }
   .supervision-stats .stat:first-child { grid-column: auto; }

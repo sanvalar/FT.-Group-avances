@@ -8,7 +8,8 @@ Frontend web (React + Vite) de FT. GROUP, basado en los prototipos de las versio
 |---|---|---|
 | `/login`, `/registro` | Autenticación | **Backend real** (`/api/auth`) |
 | `/panel` | Panel de control: balance neto, te deben / debes, liquidaciones sugeridas, mis grupos, mapa | **Backend real**, excepto la cuenta de exposición |
-| `/grupos` | Grupos financieros: tarjetas con miembros, total y mi balance; crear grupo; agregar integrantes | **Backend real**, excepto la cuenta de exposición |
+| `/grupos` | Grupos financieros: ver integrantes y balances; crear grupos y agregar integrantes, con límites visibles | **Backend real**, excepto la cuenta de exposición |
+| `/educacion` | Evaluaciones con aprobación validada por el backend, progreso consolidado y registro manual de aportes a metas de ahorro | **Backend real** |
 | `/gastos` | Registro y búsqueda de gastos, división equitativa, personalizada, por porcentaje o participaciones, artículos, moneda, plantillas, recurrencias y registro de pagos | **Backend real**, excepto la cuenta de exposición |
 | `/analisis` | Análisis y predicciones: KPIs básicos con semáforo, indicadores, estimadores, proyección y gastos atípicos | Se calcula en el navegador con los datos de gastos y grupos |
 | `/historial` | Historial por mes con filtros y búsqueda, total filtrado, movimientos recientes e importación CSV con vista previa | **Backend real**, excepto la cuenta de exposición |
@@ -28,6 +29,8 @@ El menú del moderador incluye Panel de moderación, Administración, Soporte y 
 La auditoría está disponible únicamente para supervisores. Registra solicitudes autenticadas del backend y las acciones de escritura de la demostración local. No almacena contraseñas, tokens ni datos de formularios.
 
 En las cuentas normales, los módulos financieros usan el backend y PostgreSQL. La cuenta común de exposición usa datos de ejemplo guardados en el navegador; las operaciones que realices con ella no modifican PostgreSQL. Para crear un grupo en el modo backend, los integrantes deben tener una cuenta registrada y se agregan por su correo.
+
+Cada persona puede pertenecer a un máximo de 10 grupos activos y cada grupo puede tener hasta 20 integrantes, incluyendo al administrador. La academia calcula la aprobación de cada evaluación en el backend; se requiere aprobar todas las evaluaciones esenciales con al menos 70% para habilitar el progreso de conocimiento consolidado. Las metas avanzan al registrar manualmente cada aporte que ya se apartó; la app no mueve dinero ni se conecta a cuentas bancarias.
 
 Los pagos del modo backend siguen confirmación bilateral: el deudor reporta la transferencia y el acreedor la confirma desde el panel; el balance cambia solo después de confirmar. Los errores de red o del API se muestran y no se convierten en operaciones locales exitosas. En modo de demostración, las operaciones permanecen en el navegador.
 

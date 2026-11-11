@@ -10,6 +10,10 @@ import {
   ValidacionError,
 } from '../../../../../domain/errors/DomainErrors';
 import {
+  exigirCupoEnGrupos as validarCupoDeGrupos,
+  validarMaximoIntegrantes,
+} from '../../../../../domain/services/groupLimits';
+import {
   CrearGastoDatos,
   GrupoGastoRepository,
   GrupoResumen,
@@ -31,6 +35,24 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
     instruccionesPago?: string,
   ): Promise<GrupoResumen> {
     return this.enTransaccion(async (client) => {
+      const invitados = new Set<number>();
+      for (const email of new Set(integrantes.map((valor) => valor.trim().toLowerCase()))) {
+        const resultadoUsuario = await client.query(
+          `SELECT id FROM usuario WHERE LOWER(email) = $1 AND estado = 'activo'`,
+          [email],
+        );
+        if (resultadoUsuario.rowCount === 0) throw new UsuarioNoEncontradoError(email);
+        const integranteId = Number(resultadoUsuario.rows[0].id);
+        if (integranteId !== usuarioId) invitados.add(integranteId);
+      }
+
+      const usuarioIds = [usuarioId, ...invitados];
+      validarMaximoIntegrantes(usuarioIds.length);
+      await this.bloquearLimitesUsuario(client, usuarioIds);
+      for (const integranteId of usuarioIds) {
+        await this.validarCupoGrupoUsuario(client, integranteId);
+      }
+
       const resultado = await client.query(
         `INSERT INTO grupo (nombre, descripcion, creado_por, moneda, tasa_cop, instrucciones_pago)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -44,14 +66,7 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
          VALUES ($1, $2, 'administrador')`,
         [grupo.id, usuarioId],
       );
-      for (const email of new Set(integrantes.map((valor) => valor.trim().toLowerCase()))) {
-        const resultadoUsuario = await client.query(
-          `SELECT id FROM usuario WHERE LOWER(email) = $1 AND estado = 'activo'`,
-          [email],
-        );
-        if (resultadoUsuario.rowCount === 0) throw new UsuarioNoEncontradoError(email);
-        const integranteId = Number(resultadoUsuario.rows[0].id);
-        if (integranteId === usuarioId) continue;
+      for (const integranteId of invitados) {
         await client.query(
           `INSERT INTO miembro_grupo (grupo_id, usuario_id, rol)
            VALUES ($1, $2, 'miembro')`,
@@ -166,6 +181,15 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
       if (existente.rows[0]?.estado === 'activo') {
         throw new ConflictoEstadoError('El usuario ya pertenece a este grupo.');
       }
+
+      await this.bloquearLimitesUsuario(client, [Number(usuarioId)]);
+      await this.validarCupoGrupoUsuario(client, Number(usuarioId));
+      const integrantesActivos = await client.query(
+        `SELECT COUNT(*)::int AS total
+         FROM miembro_grupo WHERE grupo_id = $1 AND estado = 'activo'`,
+        [grupoId],
+      );
+      validarMaximoIntegrantes(integrantesActivos.rows[0].total + 1);
 
       await client.query(
         `INSERT INTO miembro_grupo (grupo_id, usuario_id, rol, estado)
@@ -968,6 +992,23 @@ export class PostgresGrupoGastoRepository implements GrupoGastoRepository {
       [grupoId, usuarioId],
     );
     if (resultado.rowCount === 0) throw new AccesoDenegadoError('No tienes acceso a este grupo.');
+  }
+
+  private async bloquearLimitesUsuario(client: PoolClient, usuarioIds: number[]): Promise<void> {
+    for (const usuarioId of [...new Set(usuarioIds)].sort((a, b) => a - b)) {
+      await client.query('SELECT pg_advisory_xact_lock(771, $1)', [usuarioId]);
+    }
+  }
+
+  private async validarCupoGrupoUsuario(client: PoolClient, usuarioId: number): Promise<void> {
+    const resultado = await client.query(
+      `SELECT COUNT(*)::int AS total
+       FROM miembro_grupo m
+       JOIN grupo g ON g.id = m.grupo_id
+       WHERE m.usuario_id = $1 AND m.estado = 'activo' AND g.estado = 'activo'`,
+      [usuarioId],
+    );
+    validarCupoDeGrupos(resultado.rows[0].total);
   }
 
   private async exigirAdministrador(client: PoolClient, usuarioId: number, grupoId: number): Promise<void> {

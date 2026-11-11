@@ -11,6 +11,7 @@ import { splitEqual, pendingDebts, netBalances, pairwise } from '../utils/balanc
 import { today } from '../utils/format'
 import { arrayFromResponse } from '../utils/apiResponse'
 import { usesLocalFinance as shouldUseLocalFinance } from '../utils/demoAccount'
+import { assertCanAddGroupMember, assertCanCreateGroup } from '../utils/groupLimits'
 import { auditoriaApi } from './auditoriaApi'
 import { graphqlApi } from './graphqlApi'
 
@@ -256,20 +257,24 @@ const local = {
   async createGroup(user, { nombre, descripcion, icono, ciudad, lat, lng, moneda = 'COP', tasaCop = 1, instruccionesPago, integrantes }) {
     await delay()
     const st = load(user), me = String(user.id)
+    const invitados = new Map()
+    for (const inv of integrantes) {
+      const email = (typeof inv === 'string' ? inv : inv.email)?.trim().toLowerCase()
+      let usuario = email ? st.usuarios.find(x => x.email === email) : null
+      if (!usuario) {
+        usuario = { id: uidGen('u-'), nombre: inv.nombre?.trim() || email.split('@')[0], email: email || null }
+        st.usuarios.push(usuario)
+      }
+      if (String(usuario.id) !== me) invitados.set(String(usuario.id), usuario.id)
+    }
+    assertCanCreateGroup(st, me, [...invitados.values()])
     const id = uidGen('g-')
     st.grupos.push({ id, nombre: nombre.trim(), descripcion: descripcion?.trim() || null, icono, ciudad, lat, lng, moneda, tasaCop, instruccionesPago, creado_por: me, fecha_creacion: today(), estado: 'activo' })
     st.miembros.push({ grupo_id: id, usuario_id: me, rol: 'administrador', estado: 'activo' })
-    for (const inv of integrantes) {
-      const email = (typeof inv === 'string' ? inv : inv.email)?.trim().toLowerCase()
-      let u = email ? st.usuarios.find(x => x.email === email) : null
-      if (!u) {
-        u = { id: uidGen('u-'), nombre: inv.nombre?.trim() || email.split('@')[0], email: email || null }
-        st.usuarios.push(u)
-      }
-      if (u.id !== me && !st.miembros.some(m => m.grupo_id === id && m.usuario_id === u.id)) {
-        st.miembros.push({ grupo_id: id, usuario_id: u.id, rol: 'miembro', estado: 'activo' })
-        addHistorial(st, me, id, 'miembro_agregado', `${u.nombre} se unió al grupo`)
-      }
+    for (const usuarioId of invitados.values()) {
+      const usuario = st.usuarios.find(x => String(x.id) === String(usuarioId))
+      st.miembros.push({ grupo_id: id, usuario_id: usuarioId, rol: 'miembro', estado: 'activo' })
+      addHistorial(st, me, id, 'miembro_agregado', `${usuario.nombre} se unió al grupo`)
     }
     save(user, st)
     return viewGroups(st, me).find(g => g.id === id)
@@ -282,6 +287,7 @@ const local = {
     let u = st.usuarios.find(x => x.email === e)
     if (!u) { u = { id: uidGen('u-'), nombre: e.split('@')[0], email: e }; st.usuarios.push(u) }
     if (st.miembros.some(m => m.grupo_id === grupoId && m.usuario_id === u.id)) throw new Error(`${u.nombre} ya pertenece al grupo.`)
+    assertCanAddGroupMember(st, u.id, grupoId)
     st.miembros.push({ grupo_id: grupoId, usuario_id: u.id, rol: 'miembro', estado: 'activo' })
     addHistorial(st, me, grupoId, 'miembro_agregado', `${u.nombre} se unió al grupo`)
     save(user, st)

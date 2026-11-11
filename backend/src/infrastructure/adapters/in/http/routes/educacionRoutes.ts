@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../../../../adapters/out/persistence/postgres/db';
 import { autenticar, autorizarRoles, RequestAutenticado } from '../middlewares/authMiddleware';
+import { evaluarRespuestaAcademia } from '../../../../../domain/services/evaluarRespuestaAcademia';
 
 const router = Router();
 router.use(autenticar);
@@ -60,6 +61,15 @@ router.get('/', autorizarRoles('usuario'), async (req: RequestAutenticado, res, 
        ORDER BY l.orden`,
       [req.usuario!.id],
     );
+    const leccionesVisibles = lecciones.rows.map((leccion) => ({
+      ...leccion,
+      contenido: Array.isArray(leccion.contenido)
+        ? leccion.contenido.map((bloque: Record<string, unknown>) => {
+          if (bloque.tipo !== 'quiz') return bloque;
+          return Object.fromEntries(Object.entries(bloque).filter(([clave]) => clave !== 'respuesta'));
+        })
+        : leccion.contenido,
+    }));
     const metas = await pool.query(
       'SELECT * FROM meta_financiera WHERE usuario_id=$1 AND estado<>$2 ORDER BY fecha_limite NULLS LAST, id DESC',
       [req.usuario!.id, 'cancelada'],
@@ -68,11 +78,11 @@ router.get('/', autorizarRoles('usuario'), async (req: RequestAutenticado, res, 
       'SELECT * FROM presupuesto_categoria WHERE usuario_id=$1 ORDER BY periodo DESC, categoria',
       [req.usuario!.id],
     );
-    const completadas = lecciones.rows.filter((l) => l.estado === 'completada').length;
+    const completadas = leccionesVisibles.filter((l) => l.estado === 'completada').length;
     const recomendaciones = completadas < 2
       ? [{ tipo: 'aprender', titulo: 'Empieza por presupuesto', mensaje: 'Completa la primera ruta para convertir tus gastos en decisiones sostenibles.' }]
       : [{ tipo: 'meta', titulo: 'Revisa tus metas', mensaje: 'Compara tu progreso mensual y ajusta aportes realistas.' }];
-    res.json({ lecciones: lecciones.rows, metas: metas.rows, presupuestos: presupuestos.rows, progreso: { completadas, total: lecciones.rows.length }, recomendaciones });
+    res.json({ lecciones: leccionesVisibles, metas: metas.rows, presupuestos: presupuestos.rows, progreso: { completadas, total: leccionesVisibles.length }, recomendaciones });
   } catch (error) {
     next(error);
   }
@@ -80,10 +90,18 @@ router.get('/', autorizarRoles('usuario'), async (req: RequestAutenticado, res, 
 
 router.post('/progreso', autorizarRoles('usuario'), async (req: RequestAutenticado, res, next) => {
   try {
-    const { leccionId, puntaje } = req.body as { leccionId: string; puntaje: number };
-    if (!leccionId || !Number.isFinite(puntaje) || puntaje < 0 || puntaje > 100) {
+    const { leccionId, respuesta } = req.body as { leccionId: string; respuesta: number };
+    if (!leccionId || !Number.isInteger(respuesta)) {
       return res.status(400).json({ error: 'Datos de progreso inválidos.' });
     }
+    const leccion = await pool.query(
+      'SELECT contenido FROM academia_leccion WHERE id=$1 AND publicada=TRUE',
+      [leccionId],
+    );
+    if (leccion.rowCount === 0) {
+      return res.status(404).json({ error: 'Lección no encontrada o no publicada.' });
+    }
+    const puntaje = evaluarRespuestaAcademia(leccion.rows[0].contenido, respuesta);
     const completada = puntaje >= 70;
     const result = await pool.query(
       `INSERT INTO academia_progreso(usuario_id,leccion_id,estado,puntaje,intentos,completada_at)
@@ -97,7 +115,7 @@ router.post('/progreso', autorizarRoles('usuario'), async (req: RequestAutentica
        RETURNING *`,
       [req.usuario!.id, leccionId, completada ? 'completada' : 'iniciada', puntaje, completada ? new Date() : null],
     );
-    res.json({ progreso: result.rows[0] });
+    res.json({ progreso: result.rows[0], aprobada: completada });
   } catch (error) {
     next(error);
   }
@@ -150,6 +168,27 @@ router.patch('/metas/:metaId', autorizarRoles('usuario'), async (req: RequestAut
        estado=CASE WHEN $1>=monto_objetivo THEN 'completada' ELSE 'activa' END
        WHERE id=$2 AND usuario_id=$3 RETURNING *`,
       [montoActual, Number(req.params.metaId), req.usuario!.id],
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Meta no encontrada.' });
+    res.json({ meta: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/metas/:metaId/aportes', autorizarRoles('usuario'), async (req: RequestAutenticado, res, next) => {
+  try {
+    const aporte = Number(req.body.aporte);
+    if (!Number.isFinite(aporte) || aporte <= 0) {
+      return res.status(400).json({ error: 'El aporte de ahorro debe ser mayor que cero.' });
+    }
+    const result = await pool.query(
+      `UPDATE meta_financiera
+       SET monto_actual = monto_actual + $1,
+           estado = CASE WHEN monto_actual + $1 >= monto_objetivo THEN 'completada' ELSE 'activa' END
+       WHERE id = $2 AND usuario_id = $3 AND estado <> 'cancelada'
+       RETURNING *`,
+      [aporte, Number(req.params.metaId), req.usuario!.id],
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Meta no encontrada.' });
     res.json({ meta: result.rows[0] });

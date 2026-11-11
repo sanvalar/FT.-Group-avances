@@ -8,8 +8,8 @@ export const educationApi = {
   publishLesson: (leccionId, publicada) => http(`/educacion/moderacion/lecciones/${leccionId}/publicar`, {
     method: 'PATCH', body: { publicada },
   }),
-  completeLesson: (leccionId, puntaje) => http('/educacion/progreso', {
-    method: 'POST', body: { leccionId, puntaje },
+  completeLesson: (leccionId, respuesta) => http('/educacion/progreso', {
+    method: 'POST', body: { leccionId, respuesta },
   }),
   saveBudget: presupuesto => http('/educacion/presupuestos', {
     method: 'POST', body: presupuesto,
@@ -19,5 +19,8 @@ export const educationApi = {
   }),
   updateGoal: (id, montoActual) => http(`/educacion/metas/${id}`, {
     method: 'PATCH', body: { montoActual },
+  }),
+  addGoalContribution: (id, aporte) => http(`/educacion/metas/${id}/aportes`, {
+    method: 'POST', body: { aporte },
   }),
 }

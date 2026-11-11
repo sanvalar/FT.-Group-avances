@@ -8,6 +8,7 @@ import Icon from '../components/Icon'
 import { CIUDADES } from '../components/MapView'
 import { CURRENCIES } from '../currency/CurrencyContext'
 import { useI18n } from '../i18n/I18nContext'
+import { MAX_GROUPS_PER_PERSON, MAX_MEMBERS_PER_GROUP } from '../utils/groupLimits'
 
 function NewGroupModal({ user, onClose, onCreated }) {
   const { t } = useI18n()
@@ -17,6 +18,7 @@ function NewGroupModal({ user, onClose, onCreated }) {
   const [saving, setSaving] = useState(false)
   const change = e => setForm({ ...form, [e.target.name]: e.target.value })
   const setInt = (i, v) => setIntegrantes(list => list.map((x, j) => (j === i ? v : x)))
+  const totalIntegrantes = new Set(integrantes.map(email => email.trim().toLowerCase()).filter(Boolean)).size + 1
 
   const submit = async e => {
     e.preventDefault(); setError('')
@@ -38,6 +40,9 @@ function NewGroupModal({ user, onClose, onCreated }) {
       </>}>
       <form id="new-group" className="form" onSubmit={submit}>
         <Alert>{error}</Alert>
+        <Alert type="info">
+          {t('group_limits_notice', { maxGroups: MAX_GROUPS_PER_PERSON, maxMembers: MAX_MEMBERS_PER_GROUP })}
+        </Alert>
         <div className="field">
           <label htmlFor="g-nombre">{t('field_group_name')}</label>
           <input id="g-nombre" name="nombre" value={form.nombre} onChange={change} placeholder={t('field_group_name_ph')} maxLength={120} required autoFocus />
@@ -94,11 +99,13 @@ function NewGroupModal({ user, onClose, onCreated }) {
                 )}
               </div>
             ))}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIntegrantes(l => [...l, ''])}>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={integrantes.length >= MAX_MEMBERS_PER_GROUP - 1} onClick={() => setIntegrantes(l => [...l, ''])}>
               <Icon name="plus" size={16} />{t('group_add_member')}
             </button>
           </div>
-          <small className="hint">{t('group_member_email_help')}</small>
+          <small className="hint">
+            {t('group_member_email_help')} · {t('group_member_capacity', { count: totalIntegrantes, max: MAX_MEMBERS_PER_GROUP })}
+          </small>
         </div>
       </form>
     </Modal>
@@ -123,6 +130,9 @@ function AddMemberModal({ user, grupo, onClose, onAdded }) {
       </>}>
       <form id="add-member" className="form" onSubmit={submit}>
         <Alert>{error}</Alert>
+        <Alert type="info">
+          {t('group_member_capacity', { count: grupo.miembros.length, max: MAX_MEMBERS_PER_GROUP })}
+        </Alert>
         <div className="field">
           <label htmlFor="m-email">{t('group_member_email')}</label>
           <input id="m-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" required autoFocus />
@@ -142,11 +152,17 @@ export default function Groups({ user }) {
   if (loading) return <Loader />
   if (error) return <Alert>{error}</Alert>
 
-  const action = <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size={18} />{t('new_group_btn')}</button>
+  const maxGroupsReached = grupos.length >= MAX_GROUPS_PER_PERSON
+  const action = <button className="btn btn-primary" disabled={maxGroupsReached} onClick={() => setCreating(true)}><Icon name="plus" size={18} />{t('new_group_btn')}</button>
 
   return (
     <>
       <PageHeader title={t('groups_title')} subtitle={t('groups_subtitle', { count: grupos.length })} action={action} />
+      <Alert type={maxGroupsReached ? 'warning' : 'info'}>
+        {maxGroupsReached
+          ? t('group_limit_reached', { max: MAX_GROUPS_PER_PERSON })
+          : t('group_limits_notice', { maxGroups: MAX_GROUPS_PER_PERSON, maxMembers: MAX_MEMBERS_PER_GROUP })}
+      </Alert>
       {grupos.length === 0 ? (
         <Empty icon="users" title={t('groups_empty_title')} text={t('groups_empty_desc')} action={action} />
       ) : (
@@ -163,6 +179,20 @@ export default function Groups({ user }) {
                 {g.rol === 'administrador' && <span className="pill">{t('group_admin_badge')}</span>}
               </header>
               <AvatarStack users={g.miembros} />
+              <details className="group-members">
+                <summary>{t('group_view_members', { count: g.miembros.length, max: MAX_MEMBERS_PER_GROUP })}</summary>
+                <ul>
+                  {g.miembros.map(miembro => (
+                    <li key={miembro.id}>
+                      <span>
+                        <strong>{miembro.nombre || miembro.email}</strong>
+                        {miembro.email && <small>{miembro.email}</small>}
+                      </span>
+                      <small>{miembro.rol === 'administrador' ? t('group_admin_badge') : t('group_members')}</small>
+                    </li>
+                  ))}
+                </ul>
+              </details>
               <div className="kv-grid">
                 <div className="kv"><small>{t('group_total_expenses')}</small><strong>{money(g.total_gastos)}</strong></div>
                 <div className="kv"><small>{t('group_my_balance')}</small><strong className={g.mi_balance < 0 ? 'neg' : 'pos'}>{money(g.mi_balance)}</strong></div>
@@ -170,7 +200,7 @@ export default function Groups({ user }) {
               <div className="card-actions">
                 <Link className="card-link" to={`/gastos?grupo=${g.id}`}>{t('group_view_expenses', { count: g.num_gastos })} <Icon name="arrow" size={15} /></Link>
                 {g.rol === 'administrador' && (
-                  <button className="btn btn-ghost btn-xs" onClick={() => setAdding(g)}><Icon name="plus" size={14} />{t('group_members')}</button>
+                  <button className="btn btn-ghost btn-xs" disabled={g.miembros.length >= MAX_MEMBERS_PER_GROUP} onClick={() => setAdding(g)}><Icon name="plus" size={14} />{t('group_add_member')}</button>
                 )}
               </div>
             </article>
